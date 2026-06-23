@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_provider.dart';
+import '../../services/app_settings_provider.dart';
 import '../../theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -133,6 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildLogo() {
+    final s = context.read<AppSettingsProvider>();
     return Column(
       children: [
         Container(
@@ -140,16 +142,19 @@ class _LoginScreenState extends State<LoginScreen> {
           height: 88,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: AppColors.accent,
+            color: s.primaryColor,
             boxShadow: [
               BoxShadow(
-                color: AppColors.accent.withValues(alpha: 0.4),
+                color: s.primaryColor.withValues(alpha: 0.4),
                 blurRadius: 24,
                 spreadRadius: 4,
               ),
             ],
           ),
-          child: const Icon(Icons.two_wheeler, size: 44, color: Colors.white),
+          child: s.hasLogo
+              ? ClipOval(
+                  child: Image.memory(s.logoBytes!, fit: BoxFit.cover))
+              : const Icon(Icons.two_wheeler, size: 44, color: Colors.white),
         ),
         const SizedBox(height: 20),
         const Text(
@@ -162,22 +167,23 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        const Text(
-          'RAID',
+        Text(
+          s.appTitle,
           style: TextStyle(
             color: AppColors.textPrimary,
-            fontSize: 42,
+            fontSize: s.appTitle.length > 6 ? 28 : 42,
             fontWeight: FontWeight.w900,
-            letterSpacing: 8,
+            letterSpacing: s.appTitle.length > 6 ? 3 : 8,
             height: 1,
           ),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
         Container(
           height: 2,
           width: 60,
           decoration: BoxDecoration(
-            color: AppColors.accent,
+            color: s.primaryColor,
             borderRadius: BorderRadius.circular(1),
           ),
         ),

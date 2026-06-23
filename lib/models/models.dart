@@ -122,8 +122,9 @@ class RallyEvent {
   final String location;
   final String description;
   final bool isActive;
-  final String? gpxFileUrl;
-  final String? gpxFileName;
+  final String? gpxFileUrl;    // stored URL / base64 key after save
+  final String? gpxFileName;   // display name
+  final List<int>? gpxBytes;   // transient: raw bytes from FilePicker (not persisted directly)
   final String? logoUrl;
   final String primaryColor;
   final String secondaryColor;
@@ -138,6 +139,7 @@ class RallyEvent {
     this.isActive = false,
     this.gpxFileUrl,
     this.gpxFileName,
+    this.gpxBytes,
     this.logoUrl,
     this.primaryColor = 'E53935',
     this.secondaryColor = 'B71C1C',
@@ -194,6 +196,7 @@ class RallyEvent {
     bool? isActive,
     String? gpxFileUrl,
     String? gpxFileName,
+    List<int>? gpxBytes,
     String? logoUrl,
     String? primaryColor,
     String? secondaryColor,
@@ -207,6 +210,7 @@ class RallyEvent {
       isActive: isActive ?? this.isActive,
       gpxFileUrl: gpxFileUrl ?? this.gpxFileUrl,
       gpxFileName: gpxFileName ?? this.gpxFileName,
+      gpxBytes: gpxBytes ?? this.gpxBytes,
       logoUrl: logoUrl ?? this.logoUrl,
       primaryColor: primaryColor ?? this.primaryColor,
       secondaryColor: secondaryColor ?? this.secondaryColor,

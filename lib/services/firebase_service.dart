@@ -3,6 +3,18 @@ import 'package:crypto/crypto.dart';
 import '../models/models.dart';
 import 'local_storage_service.dart';
 
+/// Converts gpxBytes (transient) to a base64 data-URI stored in gpxFileUrl.
+RallyEvent _injectGpxBytes(RallyEvent event) {
+  if (event.gpxBytes != null && event.gpxBytes!.isNotEmpty) {
+    final b64 = base64Encode(event.gpxBytes!);
+    return event.copyWith(
+      gpxFileUrl: 'data:application/gpx+xml;base64,$b64',
+      gpxFileName: event.gpxFileName,
+    );
+  }
+  return event;
+}
+
 /// Firebase-compatible service — uses local storage as the single source of truth
 /// for the demo/web preview. In production, swap the _store* methods to Firestore calls.
 class FirebaseService {
@@ -374,16 +386,18 @@ class FirebaseService {
   }
 
   Future<void> createEvent(RallyEvent event) async {
+    final resolved = _injectGpxBytes(event);
     final events = await LocalStorageService.instance.getCachedEvents();
-    events.add(event);
+    events.add(resolved);
     await LocalStorageService.instance.cacheEvents(events);
   }
 
   Future<void> updateEvent(RallyEvent event) async {
+    final resolved = _injectGpxBytes(event);
     final events = await LocalStorageService.instance.getCachedEvents();
-    final idx = events.indexWhere((e) => e.id == event.id);
+    final idx = events.indexWhere((e) => e.id == resolved.id);
     if (idx >= 0) {
-      events[idx] = event;
+      events[idx] = resolved;
       await LocalStorageService.instance.cacheEvents(events);
     }
   }

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
@@ -303,6 +305,11 @@ class _EventFormSheetState extends State<_EventFormSheet> {
   late final TextEditingController _descCtrl;
   DateTime _selectedDate = DateTime.now();
 
+  // GPX file state
+  String? _gpxFileName;
+  Uint8List? _gpxBytes;
+  bool _clearGpx = false;  // set true when user removes existing GPX
+
   @override
   void initState() {
     super.initState();
@@ -312,6 +319,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
     _descCtrl =
         TextEditingController(text: widget.existing?.description ?? '');
     _selectedDate = widget.existing?.date ?? DateTime.now();
+    // Keep existing file name for display
+    _gpxFileName = widget.existing?.gpxFileName;
   }
 
   @override
@@ -322,8 +331,36 @@ class _EventFormSheetState extends State<_EventFormSheet> {
     super.dispose();
   }
 
+  Future<void> _pickGpxFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['gpx', 'GPX'],
+      withData: true,
+    );
+    if (result != null && result.files.single.bytes != null) {
+      setState(() {
+        _gpxBytes = result.files.single.bytes;
+        _gpxFileName = result.files.single.name;
+        _clearGpx = false;
+      });
+    }
+  }
+
+  void _removeGpxFile() {
+    setState(() {
+      _gpxBytes = null;
+      _gpxFileName = null;
+      _clearGpx = true;
+    });
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Determine final GPX values
+    final existingUrl = _clearGpx ? null : widget.existing?.gpxFileUrl;
+    final existingName = _clearGpx ? null : widget.existing?.gpxFileName;
+
     final event = RallyEvent(
       id: widget.existing?.id ?? const Uuid().v4(),
       name: _nameCtrl.text.trim(),
@@ -331,6 +368,11 @@ class _EventFormSheetState extends State<_EventFormSheet> {
       location: _locationCtrl.text.trim(),
       description: _descCtrl.text.trim(),
       isActive: widget.existing?.isActive ?? false,
+      gpxBytes: _gpxBytes,                             // new file bytes (or null)
+      gpxFileName: _gpxBytes != null ? _gpxFileName    // new pick
+          : existingName,                              // keep existing
+      gpxFileUrl: _gpxBytes != null ? null             // will be set by service
+          : existingUrl,                               // keep or clear
       createdAt: widget.existing?.createdAt ?? DateTime.now(),
     );
     widget.onSaved(event);
@@ -414,6 +456,111 @@ class _EventFormSheetState extends State<_EventFormSheet> {
                   ),
                 ),
               ),
+              const SizedBox(height: 14),
+              // ── GPX file picker ──────────────────────────────
+              const Text('GPX Route File',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  )),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: _gpxFileName != null
+                      ? AppColors.accent.withValues(alpha: 0.08)
+                      : AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _gpxFileName != null
+                        ? AppColors.accent.withValues(alpha: 0.5)
+                        : AppColors.border,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _gpxFileName != null
+                          ? Icons.route
+                          : Icons.upload_file,
+                      color: _gpxFileName != null
+                          ? AppColors.accent
+                          : AppColors.textMuted,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _gpxFileName ?? 'No file selected',
+                        style: TextStyle(
+                          color: _gpxFileName != null
+                              ? AppColors.textPrimary
+                              : AppColors.textMuted,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_gpxFileName != null) ...
+                      [
+                        GestureDetector(
+                          onTap: _pickGpxFile,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('REPLACE',
+                                style: TextStyle(
+                                  color: AppColors.accent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                )),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: _removeGpxFile,
+                          child: const Icon(Icons.close,
+                              color: AppColors.error, size: 18),
+                        ),
+                      ]
+                    else
+                      GestureDetector(
+                        onTap: _pickGpxFile,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('BROWSE',
+                              style: TextStyle(
+                                color: AppColors.accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              )),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (_gpxBytes != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle,
+                          color: AppColors.success, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${(_gpxBytes!.length / 1024).toStringAsFixed(1)} KB ready to save',
+                        style: const TextStyle(
+                            color: AppColors.success, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,

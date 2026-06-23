@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/models.dart';
+import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import 'admin_settings_screen.dart';
 import 'events_screen.dart';
 import 'users_screen.dart';
 import 'live_dashboard_screen.dart';
@@ -26,10 +28,12 @@ class _AdminHomeState extends State<AdminHome> {
     UsersScreen(),
     LiveDashboardScreen(),
     LeaderboardScreen(),
+    AdminSettingsScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
+    final s = context.watch<AppSettingsProvider>();
     return Scaffold(
       backgroundColor: AppColors.background,
       body: IndexedStack(index: _currentIndex, children: _pages),
@@ -41,6 +45,7 @@ class _AdminHomeState extends State<AdminHome> {
           currentIndex: _currentIndex,
           onTap: (i) => setState(() => _currentIndex = i),
           type: BottomNavigationBarType.fixed,
+          selectedItemColor: s.primaryColor,
           items: const [
             BottomNavigationBarItem(
                 icon: Icon(Icons.home), label: 'Home'),
@@ -52,6 +57,8 @@ class _AdminHomeState extends State<AdminHome> {
                 icon: Icon(Icons.grid_view), label: 'Live'),
             BottomNavigationBarItem(
                 icon: Icon(Icons.leaderboard), label: 'Ranks'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.settings), label: 'Settings'),
           ],
         ),
       ),

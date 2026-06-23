@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../models/models.dart';
+import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../theme/app_theme.dart';
@@ -198,10 +199,11 @@ class _DashboardTabState extends State<_DashboardTab> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().currentUser;
+    final fs = context.watch<AppSettingsProvider>().fontScaleOrganizer;
     return SafeArea(
       child: Column(
         children: [
-          _buildHeader(user),
+          _buildHeader(user, fs),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
@@ -243,7 +245,7 @@ class _DashboardTabState extends State<_DashboardTab> {
     );
   }
 
-  Widget _buildHeader(AppUser? user) {
+  Widget _buildHeader(AppUser? user, double fs) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       decoration: const BoxDecoration(
@@ -258,16 +260,16 @@ class _DashboardTabState extends State<_DashboardTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('CHECKPOINT MARSHAL',
+                Text('CHECKPOINT MARSHAL',
                     style: TextStyle(
                       color: AppColors.textPrimary,
-                      fontSize: 15,
+                      fontSize: 15 * fs,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.5,
                     )),
                 Text(user?.fullName ?? '',
-                    style: const TextStyle(
-                        color: AppColors.textMuted, fontSize: 11)),
+                    style: TextStyle(
+                        color: AppColors.textMuted, fontSize: 11 * fs)),
               ],
             ),
           ),
@@ -305,18 +307,21 @@ class _DashboardTabState extends State<_DashboardTab> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              widget.pendingCount == 0
-                  ? 'All records synced'
-                  : '${widget.pendingCount} record(s) pending sync',
-              style: TextStyle(
-                color: widget.pendingCount == 0
-                    ? AppColors.success
-                    : AppColors.error,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
+            child: Builder(builder: (ctx) {
+              final fs = ctx.watch<AppSettingsProvider>().fontScaleOrganizer;
+              return Text(
+                widget.pendingCount == 0
+                    ? 'All records synced'
+                    : '${widget.pendingCount} record(s) pending sync',
+                style: TextStyle(
+                  color: widget.pendingCount == 0
+                      ? AppColors.success
+                      : AppColors.error,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13 * fs,
+                ),
+              );
+            }),
           ),
           ElevatedButton.icon(
             onPressed: widget.isSyncing ? null : widget.onSync,
@@ -369,33 +374,41 @@ class _DashboardTabState extends State<_DashboardTab> {
                     letterSpacing: 1.5)),
           ]),
           const SizedBox(height: 10),
-          Text(cp.name,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              )),
-          if (cp.description != null)
-            Text(cp.description!,
-                style: const TextStyle(
-                    color: Colors.white70, fontSize: 12)),
-          if (cp.latitude != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(children: [
-                const Icon(Icons.location_on,
-                    color: Colors.white70, size: 12),
-                const SizedBox(width: 4),
-                Text(
-                    '${cp.latitude!.toStringAsFixed(4)}, ${cp.longitude!.toStringAsFixed(4)}',
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 11)),
-              ]),
-            ),
-          const SizedBox(height: 10),
-          Text(widget.event?.name ?? '',
-              style: const TextStyle(
-                  color: Colors.white60, fontSize: 11)),
+          Builder(builder: (ctx) {
+            final fs = ctx.watch<AppSettingsProvider>().fontScaleOrganizer;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(cp.name,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20 * fs,
+                      fontWeight: FontWeight.w900,
+                    )),
+                if (cp.description != null)
+                  Text(cp.description!,
+                      style: TextStyle(
+                          color: Colors.white70, fontSize: 12 * fs)),
+                if (cp.latitude != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(children: [
+                      const Icon(Icons.location_on,
+                          color: Colors.white70, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                          '${cp.latitude!.toStringAsFixed(4)}, ${cp.longitude!.toStringAsFixed(4)}',
+                          style: TextStyle(
+                              color: Colors.white70, fontSize: 11 * fs)),
+                    ]),
+                  ),
+                const SizedBox(height: 10),
+                Text(widget.event?.name ?? '',
+                    style: TextStyle(
+                        color: Colors.white60, fontSize: 11 * fs)),
+              ],
+            );
+          }),
         ],
       ),
     );
@@ -460,22 +473,25 @@ class _DashboardTabState extends State<_DashboardTab> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(p.participantName,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                    )),
-                Text(
-                  DateFormat('HH:mm:ss · dd MMM').format(p.localTime),
-                  style: const TextStyle(
-                      color: AppColors.textMuted, fontSize: 12),
-                ),
-              ],
-            ),
+            child: Builder(builder: (ctx) {
+              final fs = ctx.watch<AppSettingsProvider>().fontScaleOrganizer;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(p.participantName,
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14 * fs,
+                      )),
+                  Text(
+                    DateFormat('HH:mm:ss · dd MMM').format(p.localTime),
+                    style: TextStyle(
+                        color: AppColors.textMuted, fontSize: 12 * fs),
+                  ),
+                ],
+              );
+            }),
           ),
           Icon(
             p.syncStatus == SyncStatus.synced
@@ -704,14 +720,17 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
               children: [
                 const Icon(Icons.leaderboard, color: AppColors.accent, size: 24),
                 const SizedBox(width: 12),
-                const Expanded(
-                  child: Text('LEADERBOARD',
-                      style: TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      )),
+                Expanded(
+                  child: Builder(builder: (ctx) {
+                    final fs = ctx.watch<AppSettingsProvider>().fontScaleOrganizer;
+                    return Text('LEADERBOARD',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 16 * fs,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ));
+                  }),
                 ),
                 IconButton(
                   icon: const Icon(Icons.refresh, color: AppColors.textMuted),
@@ -810,17 +829,25 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(e.participant.fullName ?? e.participant.username,
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        )),
-                    Text(
-                      '${e.participant.bikeBrand ?? ''} ${e.participant.bikeModel ?? ''} · ${e.checkpointsCount}/${_checkpoints.length} CPs',
-                      style: const TextStyle(
-                          color: AppColors.textMuted, fontSize: 11),
-                    ),
+                    Builder(builder: (ctx) {
+                      final fs = ctx.watch<AppSettingsProvider>().fontScaleOrganizer;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(e.participant.fullName ?? e.participant.username,
+                              style: TextStyle(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14 * fs,
+                              )),
+                          Text(
+                            '${e.participant.bikeBrand ?? ''} ${e.participant.bikeModel ?? ''} · ${e.checkpointsCount}/${_checkpoints.length} CPs',
+                            style: TextStyle(
+                                color: AppColors.textMuted, fontSize: 11 * fs),
+                          ),
+                        ],
+                      );
+                    }),
                   ],
                 ),
               ),

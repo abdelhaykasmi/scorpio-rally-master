@@ -4,6 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../models/models.dart';
 import '../../services/auth_provider.dart';
+import '../../services/app_settings_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
@@ -99,20 +100,22 @@ class _QRCodeTabState extends State<_QRCodeTab> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().currentUser;
+    final s    = context.watch<AppSettingsProvider>();
+    final fs   = s.fontScaleParticipant;
     return SafeArea(
       child: Column(
         children: [
-          _buildHeader(user),
+          _buildHeader(user, s, fs),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  if (_event != null) _buildEventBadge(),
+                  if (_event != null) _buildEventBadge(s),
                   const SizedBox(height: 24),
-                  _buildQRCard(user),
+                  _buildQRCard(user, s, fs),
                   const SizedBox(height: 20),
-                  _buildBikeInfo(user),
+                  _buildBikeInfo(user, fs),
                 ],
               ),
             ),
@@ -122,7 +125,7 @@ class _QRCodeTabState extends State<_QRCodeTab> {
     );
   }
 
-  Widget _buildHeader(AppUser? user) {
+  Widget _buildHeader(AppUser? user, AppSettingsProvider s, double fs) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       decoration: const BoxDecoration(
@@ -131,24 +134,37 @@ class _QRCodeTabState extends State<_QRCodeTab> {
       ),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.accent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Text(
-                user?.bibNumber ?? '#',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
+          // Logo or bib badge
+          s.hasLogo
+              ? Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(s.logoBytes!, fit: BoxFit.cover),
+                  ),
+                )
+              : Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: s.primaryColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Text(
+                      user?.bibNumber ?? '#',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14 * fs,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -156,52 +172,53 @@ class _QRCodeTabState extends State<_QRCodeTab> {
               children: [
                 Text(
                   user?.fullName ?? 'Rider',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.textPrimary,
-                    fontSize: 16,
+                    fontSize: 16 * fs,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
                   '${user?.bikeBrand ?? ''} ${user?.bikeModel ?? ''}',
-                  style: const TextStyle(
-                      color: AppColors.textMuted, fontSize: 12),
+                  style: TextStyle(
+                      color: AppColors.textMuted, fontSize: 12 * fs),
                 ),
               ],
             ),
           ),
-          const Icon(Icons.two_wheeler, color: AppColors.accent, size: 28),
+          Icon(Icons.two_wheeler, color: s.primaryColor, size: 28),
         ],
       ),
     );
   }
 
-  Widget _buildEventBadge() {
+  Widget _buildEventBadge(AppSettingsProvider s) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.accent.withValues(alpha: 0.1),
+        color: s.primaryColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+        border: Border.all(color: s.primaryColor.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.flag, color: AppColors.accent, size: 16),
+          Icon(Icons.flag, color: s.primaryColor, size: 16),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(_event!.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textPrimary,
                       fontWeight: FontWeight.w700,
-                      fontSize: 13,
+                      fontSize: 13 * s.fontScaleParticipant,
                     )),
                 Text(
                   '${_event!.location} · ${DateFormat('dd MMM yyyy').format(_event!.date)}',
-                  style: const TextStyle(
-                      color: AppColors.textMuted, fontSize: 11),
+                  style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11 * s.fontScaleParticipant),
                 ),
               ],
             ),
@@ -215,7 +232,7 @@ class _QRCodeTabState extends State<_QRCodeTab> {
     );
   }
 
-  Widget _buildQRCard(AppUser? user) {
+  Widget _buildQRCard(AppUser? user, AppSettingsProvider s, double fs) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -225,10 +242,10 @@ class _QRCodeTabState extends State<_QRCodeTab> {
       ),
       child: Column(
         children: [
-          const Text('CHECKPOINT QR CODE',
+          Text('CHECKPOINT QR CODE',
               style: TextStyle(
                 color: AppColors.textMuted,
-                fontSize: 10,
+                fontSize: 10 * fs,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 2,
               )),
@@ -254,11 +271,11 @@ class _QRCodeTabState extends State<_QRCodeTab> {
                       color: Color(0xFF1A1A1A),
                     ),
                   )
-                : const SizedBox(
+                : SizedBox(
                     width: 200,
                     height: 200,
                     child: Center(
-                      child: CircularProgressIndicator(color: AppColors.accent),
+                      child: CircularProgressIndicator(color: s.primaryColor),
                     ),
                   ),
           ),
@@ -270,10 +287,10 @@ class _QRCodeTabState extends State<_QRCodeTab> {
               const SizedBox(width: 6),
               Text(
                 user?.fullName ?? '',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.w700,
-                  fontSize: 14,
+                  fontSize: 14 * fs,
                 ),
               ),
             ],
@@ -281,23 +298,23 @@ class _QRCodeTabState extends State<_QRCodeTab> {
           const SizedBox(height: 4),
           Text(
             'BIB #${user?.bibNumber ?? 'N/A'}',
-            style: const TextStyle(
-                color: AppColors.accent,
-                fontSize: 20,
+            style: TextStyle(
+                color: s.primaryColor,
+                fontSize: 20 * fs,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 2),
           ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'Show this QR code at each checkpoint',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12 * fs),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBikeInfo(AppUser? user) {
+  Widget _buildBikeInfo(AppUser? user, double fs) {
     return CarbonCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,10 +322,10 @@ class _QRCodeTabState extends State<_QRCodeTab> {
           Row(children: [
             const Icon(Icons.two_wheeler, color: AppColors.accent, size: 18),
             const SizedBox(width: 8),
-            const Text('BIKE DETAILS',
+            Text('BIKE DETAILS',
                 style: TextStyle(
                   color: AppColors.textMuted,
-                  fontSize: 10,
+                  fontSize: 10 * fs,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.5,
                 )),
@@ -318,17 +335,17 @@ class _QRCodeTabState extends State<_QRCodeTab> {
             children: [
               Expanded(
                 child: _miniStat(
-                    'BRAND', user?.bikeBrand ?? '—', Icons.label),
+                    'BRAND', user?.bikeBrand ?? '—', Icons.label, fs),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _miniStat(
-                    'MODEL', user?.bikeModel ?? '—', Icons.model_training),
+                    'MODEL', user?.bikeModel ?? '—', Icons.model_training, fs),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _miniStat(
-                    'ENGINE', '${user?.engineSize ?? '—'}cc', Icons.speed),
+                    'ENGINE', '${user?.engineSize ?? '—'}cc', Icons.speed, fs),
               ),
             ],
           ),
@@ -337,21 +354,21 @@ class _QRCodeTabState extends State<_QRCodeTab> {
     );
   }
 
-  Widget _miniStat(String label, String value, IconData icon) {
+  Widget _miniStat(String label, String value, IconData icon, double fs) {
     return Column(
       children: [
         Icon(icon, color: AppColors.textMuted, size: 18),
         const SizedBox(height: 4),
         Text(value,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.textPrimary,
-              fontSize: 13,
+              fontSize: 13 * fs,
               fontWeight: FontWeight.w700,
             )),
         const SizedBox(height: 2),
         Text(label,
-            style: const TextStyle(
-                color: AppColors.textMuted, fontSize: 10)),
+            style: TextStyle(
+                color: AppColors.textMuted, fontSize: 10 * fs)),
       ],
     );
   }
@@ -370,6 +387,7 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
   List<Checkpoint> _checkpoints = [];
   RallyEvent? _event;
   bool _loading = true;
+  double _fs = 1.0;
 
   @override
   void initState() {
@@ -398,6 +416,7 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
 
   @override
   Widget build(BuildContext context) {
+    _fs = context.watch<AppSettingsProvider>().fontScaleParticipant;
     return SafeArea(
       child: Column(
         children: [
@@ -424,20 +443,20 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
         children: [
           const Icon(Icons.route, color: AppColors.accent, size: 24),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('MY CHECKPOINTS',
                     style: TextStyle(
                       color: AppColors.textPrimary,
-                      fontSize: 16,
+                      fontSize: 16 * _fs,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.5,
                     )),
                 Text('Passage history for active event',
                     style: TextStyle(
-                        color: AppColors.textMuted, fontSize: 11)),
+                        color: AppColors.textMuted, fontSize: 11 * _fs)),
               ],
             ),
           ),
@@ -487,16 +506,16 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
                   children: [
                     Text(
                       '$completed / $total checkpoints',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.textPrimary,
-                        fontSize: 22,
+                        fontSize: 22 * _fs,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
                     Text('${total > 0 ? (completed / total * 100).toInt() : 0}%',
-                        style: const TextStyle(
+                        style: TextStyle(
                             color: AppColors.accent,
-                            fontSize: 22,
+                            fontSize: 22 * _fs,
                             fontWeight: FontWeight.w900)),
                   ],
                 ),
@@ -580,18 +599,18 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
                           ? AppColors.textPrimary
                           : AppColors.textSecondary,
                       fontWeight: FontWeight.w700,
-                      fontSize: 14,
+                      fontSize: 14 * _fs,
                     )),
                 if (passed && passage != null)
                   Text(
                     DateFormat('dd MMM · HH:mm:ss').format(passage.localTime),
-                    style: const TextStyle(
-                        color: AppColors.success, fontSize: 12),
+                    style: TextStyle(
+                        color: AppColors.success, fontSize: 12 * _fs),
                   )
                 else
-                  const Text('Not yet passed',
+                  Text('Not yet passed',
                       style: TextStyle(
-                          color: AppColors.textMuted, fontSize: 12)),
+                          color: AppColors.textMuted, fontSize: 12 * _fs)),
               ],
             ),
           ),
@@ -625,7 +644,7 @@ class _EventInfoTabState extends State<_EventInfoTab> {
     final event = await FirebaseService.instance.getActiveEvent();
     if (event != null) {
       final cps = await FirebaseService.instance.getCheckpoints(event.id);
-      setState(() {
+      if (mounted) setState(() {
         _event = event;
         _checkpoints = cps;
       });
@@ -634,38 +653,39 @@ class _EventInfoTabState extends State<_EventInfoTab> {
 
   @override
   Widget build(BuildContext context) {
+    final fs = context.watch<AppSettingsProvider>().fontScaleParticipant;
     return SafeArea(
       child: Column(
         children: [
-          _buildHeader(),
+          _buildHeader(fs),
           Expanded(
             child: _event == null
                 ? const EmptyState(
                     icon: Icons.event_busy,
                     title: 'No Active Event',
                   )
-                : _buildContent(),
+                : _buildContent(fs),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(double fs) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       decoration: const BoxDecoration(
         color: AppColors.surface,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.event, color: AppColors.accent, size: 24),
-          SizedBox(width: 12),
+          const Icon(Icons.event, color: AppColors.accent, size: 24),
+          const SizedBox(width: 12),
           Text('EVENT INFO',
               style: TextStyle(
                 color: AppColors.textPrimary,
-                fontSize: 16,
+                fontSize: 16 * fs,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
               )),
@@ -674,7 +694,7 @@ class _EventInfoTabState extends State<_EventInfoTab> {
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(double fs) {
     final e = _event!;
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -693,9 +713,9 @@ class _EventInfoTabState extends State<_EventInfoTab> {
                   label: 'ACTIVE EVENT', color: Colors.white),
               const SizedBox(height: 12),
               Text(e.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 20,
+                    fontSize: 20 * fs,
                     fontWeight: FontWeight.w900,
                   )),
               const SizedBox(height: 8),
@@ -703,8 +723,8 @@ class _EventInfoTabState extends State<_EventInfoTab> {
                 const Icon(Icons.location_on, color: Colors.white70, size: 14),
                 const SizedBox(width: 4),
                 Text(e.location,
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 13)),
+                    style: TextStyle(
+                        color: Colors.white70, fontSize: 13 * fs)),
               ]),
               const SizedBox(height: 4),
               Row(children: [
@@ -712,8 +732,8 @@ class _EventInfoTabState extends State<_EventInfoTab> {
                     color: Colors.white70, size: 14),
                 const SizedBox(width: 4),
                 Text(DateFormat('dd MMMM yyyy').format(e.date),
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 13)),
+                    style: TextStyle(
+                        color: Colors.white70, fontSize: 13 * fs)),
               ]),
             ],
           ),
@@ -723,18 +743,18 @@ class _EventInfoTabState extends State<_EventInfoTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('DESCRIPTION',
+              Text('DESCRIPTION',
                   style: TextStyle(
                     color: AppColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 10 * fs,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.5,
                   )),
               const SizedBox(height: 10),
               Text(e.description,
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: AppColors.textSecondary,
-                      fontSize: 14,
+                      fontSize: 14 * fs,
                       height: 1.5)),
             ],
           ),
@@ -779,15 +799,15 @@ class _EventInfoTabState extends State<_EventInfoTab> {
                               ? AppColors.textPrimary
                               : AppColors.textMuted,
                           fontWeight: FontWeight.w700,
-                          fontSize: 14,
+                          fontSize: 14 * fs,
                         ),
                       ),
                       Text(
                         e.gpxFileUrl != null
                             ? 'Tap to download for Garmin / Wikiloc'
                             : 'No GPX file uploaded yet',
-                        style: const TextStyle(
-                            color: AppColors.textMuted, fontSize: 12),
+                        style: TextStyle(
+                            color: AppColors.textMuted, fontSize: 12 * fs),
                       ),
                     ],
                   ),
@@ -803,12 +823,12 @@ class _EventInfoTabState extends State<_EventInfoTab> {
         // Checkpoints list
         const SectionHeader(title: 'Checkpoints', padding: EdgeInsets.zero),
         const SizedBox(height: 8),
-        ..._checkpoints.map((cp) => _buildCpRow(cp)),
+        ..._checkpoints.map((cp) => _buildCpRow(cp, fs)),
       ],
     );
   }
 
-  Widget _buildCpRow(Checkpoint cp) {
+  Widget _buildCpRow(Checkpoint cp, double fs) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
@@ -830,10 +850,10 @@ class _EventInfoTabState extends State<_EventInfoTab> {
             ),
             child: Center(
               child: Text('${cp.order}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.accent,
                     fontWeight: FontWeight.w900,
-                    fontSize: 13,
+                    fontSize: 13 * fs,
                   )),
             ),
           ),
@@ -843,15 +863,15 @@ class _EventInfoTabState extends State<_EventInfoTab> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(cp.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textPrimary,
                       fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontSize: 13 * fs,
                     )),
                 if (cp.description != null)
                   Text(cp.description!,
-                      style: const TextStyle(
-                          color: AppColors.textMuted, fontSize: 11)),
+                      style: TextStyle(
+                          color: AppColors.textMuted, fontSize: 11 * fs)),
               ],
             ),
           ),
@@ -880,6 +900,7 @@ class _ProfileTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().currentUser;
+    final fs = context.watch<AppSettingsProvider>().fontScaleParticipant;
     return SafeArea(
       child: Column(
         children: [
@@ -893,10 +914,10 @@ class _ProfileTab extends StatelessWidget {
               children: [
                 const Icon(Icons.person, color: AppColors.accent, size: 24),
                 const SizedBox(width: 12),
-                const Text('PROFILE',
+                Text('PROFILE',
                     style: TextStyle(
                       color: AppColors.textPrimary,
-                      fontSize: 16,
+                      fontSize: 16 * fs,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.5,
                     )),
@@ -904,7 +925,8 @@ class _ProfileTab extends StatelessWidget {
                 TextButton.icon(
                   onPressed: () => context.read<AuthProvider>().signOut(),
                   icon: const Icon(Icons.logout, size: 16),
-                  label: const Text('Logout'),
+                  label: Text('Logout',
+                      style: TextStyle(fontSize: 13 * fs)),
                   style: TextButton.styleFrom(
                       foregroundColor: AppColors.textMuted),
                 ),
@@ -935,9 +957,9 @@ class _ProfileTab extends StatelessWidget {
                         child: Center(
                           child: Text(
                             user?.bibNumber ?? '#',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
-                              fontSize: 24,
+                              fontSize: 24 * fs,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
@@ -945,14 +967,14 @@ class _ProfileTab extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(user?.fullName ?? 'Rider',
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.textPrimary,
-                            fontSize: 20,
+                            fontSize: 20 * fs,
                             fontWeight: FontWeight.w800,
                           )),
                       Text(user?.nationality ?? '',
-                          style: const TextStyle(
-                              color: AppColors.textMuted, fontSize: 14)),
+                          style: TextStyle(
+                              color: AppColors.textMuted, fontSize: 14 * fs)),
                     ],
                   ),
                 ),
@@ -961,18 +983,18 @@ class _ProfileTab extends StatelessWidget {
                   InfoRow(label: 'Full Name', value: user?.fullName ?? '—', icon: Icons.person),
                   InfoRow(label: 'Bib Number', value: '#${user?.bibNumber ?? '—'}', icon: Icons.tag),
                   InfoRow(label: 'Nationality', value: user?.nationality ?? '—', icon: Icons.flag),
-                ]),
+                ], fs),
                 const SizedBox(height: 16),
                 _section('BIKE', [
                   InfoRow(label: 'Brand', value: user?.bikeBrand ?? '—', icon: Icons.two_wheeler),
                   InfoRow(label: 'Model', value: user?.bikeModel ?? '—', icon: Icons.model_training),
                   InfoRow(label: 'Engine', value: '${user?.engineSize ?? '—'}cc', icon: Icons.speed),
-                ]),
+                ], fs),
                 const SizedBox(height: 16),
                 _section('EMERGENCY CONTACT', [
                   InfoRow(label: 'Contact Name', value: user?.emergencyContactName ?? '—', icon: Icons.contact_emergency),
                   InfoRow(label: 'Phone', value: user?.emergencyContactPhone ?? '—', icon: Icons.phone),
-                ]),
+                ], fs),
               ],
             ),
           ),
@@ -981,7 +1003,7 @@ class _ProfileTab extends StatelessWidget {
     );
   }
 
-  Widget _section(String title, List<Widget> rows) {
+  Widget _section(String title, List<Widget> rows, double fs) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -993,9 +1015,9 @@ class _ProfileTab extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.textMuted,
-                fontSize: 10,
+                fontSize: 10 * fs,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.5,
               )),
