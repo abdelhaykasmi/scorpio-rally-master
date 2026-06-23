@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/models.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import '../../utils/qr_helper.dart';
@@ -28,15 +28,15 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final event = await FirebaseService.instance.getActiveEvent();
+    final event = await SupabaseService.instance.getActiveEvent();
     if (event == null) {
       setState(() => _loading = false);
       return;
     }
-    final participants = await FirebaseService.instance.getParticipants();
-    final checkpoints = await FirebaseService.instance.getCheckpoints(event.id);
+    final participants = await SupabaseService.instance.getParticipants();
+    final checkpoints = await SupabaseService.instance.getCheckpoints(event.id);
     final passages =
-        await FirebaseService.instance.getAllPassagesForEvent(event.id);
+        await SupabaseService.instance.getAllPassagesForEvent(event.id);
 
     final entries = participants.map((p) {
       final times = <String, DateTime>{};

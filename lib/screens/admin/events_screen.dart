@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'checkpoints_screen.dart';
@@ -27,7 +27,7 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _load() async {
-    final events = await FirebaseService.instance.getEvents();
+    final events = await SupabaseService.instance.getEvents();
     setState(() {
       _events = events
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -44,7 +44,7 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _activateEvent(RallyEvent event) async {
-    await FirebaseService.instance.activateEvent(event.id);
+    await SupabaseService.instance.activateEvent(event.id);
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,7 +76,7 @@ class _EventsScreenState extends State<EventsScreen> {
       ),
     );
     if (confirm == true) {
-      await FirebaseService.instance.deleteEvent(event.id);
+      await SupabaseService.instance.deleteEvent(event.id);
       await _load();
     }
   }
@@ -93,9 +93,9 @@ class _EventsScreenState extends State<EventsScreen> {
         existing: existing,
         onSaved: (event) async {
           if (existing == null) {
-            await FirebaseService.instance.createEvent(event);
+            await SupabaseService.instance.createEvent(event);
           } else {
-            await FirebaseService.instance.updateEvent(event);
+            await SupabaseService.instance.updateEvent(event);
           }
           await _load();
         },

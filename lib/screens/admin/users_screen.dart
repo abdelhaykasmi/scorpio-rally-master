@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -33,7 +33,7 @@ class _UsersScreenState extends State<UsersScreen>
   }
 
   Future<void> _load() async {
-    final all = await FirebaseService.instance.getUsers();
+    final all = await SupabaseService.instance.getUsers();
     setState(() {
       _participants =
           all.where((u) => u.role == UserRole.participant).toList();
@@ -127,9 +127,9 @@ class _UsersScreenState extends State<UsersScreen>
         defaultRole: defaultRole,
         onSaved: (user) async {
           if (existing == null) {
-            await FirebaseService.instance.createUser(user);
+            await SupabaseService.instance.createUser(user);
           } else {
-            await FirebaseService.instance.updateUser(user);
+            await SupabaseService.instance.updateUser(user);
           }
           await _load();
         },
@@ -205,7 +205,7 @@ class _UserList extends StatelessWidget {
       builder: (_) => _UserFormSheet(
         defaultRole: role,
         onSaved: (user) async {
-          await FirebaseService.instance.createUser(user);
+          await SupabaseService.instance.createUser(user);
           onRefresh();
         },
       ),
@@ -304,17 +304,17 @@ class _UserList extends StatelessWidget {
                     existing: user,
                     defaultRole: user.role,
                     onSaved: (updated) async {
-                      await FirebaseService.instance.updateUser(updated);
+                      await SupabaseService.instance.updateUser(updated);
                       onRefresh();
                     },
                   ),
                 );
               } else if (action == 'toggle') {
-                await FirebaseService.instance
+                await SupabaseService.instance
                     .updateUser(user.copyWith(isActive: !user.isActive));
                 onRefresh();
               } else if (action == 'delete') {
-                await FirebaseService.instance.deleteUser(user.id);
+                await SupabaseService.instance.deleteUser(user.id);
                 onRefresh();
               }
             },
@@ -400,7 +400,7 @@ class _UserFormSheetState extends State<_UserFormSheet> {
     if (!_formKey.currentState!.validate()) return;
     final password = _passwordCtrl.text.trim();
     final hash = password.isNotEmpty
-        ? FirebaseService.hashPassword(password)
+        ? SupabaseService.hashPassword(password)
         : (widget.existing?.passwordHash ?? '');
 
     final user = AppUser(

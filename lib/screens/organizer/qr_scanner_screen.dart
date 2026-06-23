@@ -3,7 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
 import '../../widgets/common_widgets.dart';
@@ -82,7 +82,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
 
     // Look up participant
-    final participant = await FirebaseService.instance.getUserById(pid);
+    final participant = await SupabaseService.instance.getUserById(pid);
     if (participant == null) {
       setState(() {
         _error = 'Participant not found in system.';
@@ -92,7 +92,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     }
 
     // Check for duplicate
-    final duplicate = await FirebaseService.instance.findDuplicate(
+    final duplicate = await SupabaseService.instance.findDuplicate(
         pid, widget.checkpoint.id, widget.event.id);
 
     _controller.stop();
@@ -123,10 +123,10 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       syncStatus: SyncStatus.pending,
     );
 
-    await FirebaseService.instance.recordPassage(passage);
+    await SupabaseService.instance.recordPassage(passage);
 
     // Try to sync immediately
-    await FirebaseService.instance.syncPendingPassages();
+    await SupabaseService.instance.syncPendingPassages();
 
     widget.onPassageRecorded();
 

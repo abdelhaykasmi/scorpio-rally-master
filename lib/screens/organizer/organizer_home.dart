@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import '../../models/models.dart';
 import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
 import '../../widgets/common_widgets.dart';
@@ -32,16 +32,16 @@ class _OrganizerHomeState extends State<OrganizerHome> {
 
   Future<void> _loadData() async {
     final user = context.read<AuthProvider>().currentUser;
-    final event = await FirebaseService.instance.getActiveEvent();
+    final event = await SupabaseService.instance.getActiveEvent();
     if (user?.assignedCheckpointId != null && event != null) {
       final checkpoints =
-          await FirebaseService.instance.getCheckpoints(event.id);
+          await SupabaseService.instance.getCheckpoints(event.id);
       Checkpoint? cp;
       try {
         cp = checkpoints
             .firstWhere((c) => c.id == user!.assignedCheckpointId);
       } catch (_) {}
-      final pending = await FirebaseService.instance.getPendingCount();
+      final pending = await SupabaseService.instance.getPendingCount();
       if (mounted) {
         setState(() {
           _checkpoint = cp;
@@ -54,8 +54,8 @@ class _OrganizerHomeState extends State<OrganizerHome> {
 
   Future<void> _sync() async {
     setState(() => _isSyncing = true);
-    await FirebaseService.instance.syncPendingPassages();
-    final pending = await FirebaseService.instance.getPendingCount();
+    await SupabaseService.instance.syncPendingPassages();
+    final pending = await SupabaseService.instance.getPendingCount();
     setState(() {
       _isSyncing = false;
       _pendingCount = pending;
@@ -185,7 +185,7 @@ class _DashboardTabState extends State<_DashboardTab> {
 
   Future<void> _load() async {
     if (widget.checkpoint != null && widget.event != null) {
-      final passages = await FirebaseService.instance.getPassagesForCheckpoint(
+      final passages = await SupabaseService.instance.getPassagesForCheckpoint(
           widget.checkpoint!.id, widget.event!.id);
       if (mounted) setState(() {
         _passages = passages;
@@ -665,10 +665,10 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
       setState(() => _loading = false);
       return;
     }
-    final participants = await FirebaseService.instance.getParticipants();
+    final participants = await SupabaseService.instance.getParticipants();
     final checkpoints =
-        await FirebaseService.instance.getCheckpoints(widget.event!.id);
-    final passages = await FirebaseService.instance
+        await SupabaseService.instance.getCheckpoints(widget.event!.id);
+    final passages = await SupabaseService.instance
         .getAllPassagesForEvent(widget.event!.id);
 
     final entries = <_LeaderEntry>[];

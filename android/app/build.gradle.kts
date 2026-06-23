@@ -1,3 +1,7 @@
+// ✅ CRITICAL: Required imports for signing configuration
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,8 +9,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// ── Load key.properties ───────────────────────────────────
+val keyPropertiesFile = rootProject.file("key.properties")
+val keyProperties = Properties()
+if (keyPropertiesFile.exists()) {
+    keyProperties.load(FileInputStream(keyPropertiesFile))
+}
+
 android {
-    namespace = "com.rallymaster.rally_master"
+    namespace = "com.rallymaster.rally"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -19,11 +30,18 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    // ── Signing configuration ─────────────────────────────
+    signingConfigs {
+        create("release") {
+            keyAlias     = keyProperties["keyAlias"]    as String
+            keyPassword  = keyProperties["keyPassword"] as String
+            storeFile    = file(keyProperties["storeFile"] as String)
+            storePassword = keyProperties["storePassword"] as String
+        }
+    }
+
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.rallymaster.rally_master"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.rallymaster.rally"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -32,9 +50,9 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

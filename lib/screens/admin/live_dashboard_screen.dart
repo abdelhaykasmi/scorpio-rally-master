@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/models.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import '../../utils/csv_exporter.dart';
@@ -28,13 +28,13 @@ class _LiveDashboardScreenState extends State<LiveDashboardScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final event = await FirebaseService.instance.getActiveEvent();
-    final participants = await FirebaseService.instance.getParticipants();
+    final event = await SupabaseService.instance.getActiveEvent();
+    final participants = await SupabaseService.instance.getParticipants();
     List<Checkpoint> checkpoints = [];
     List<CheckpointPassage> passages = [];
     if (event != null) {
-      checkpoints = await FirebaseService.instance.getCheckpoints(event.id);
-      passages = await FirebaseService.instance.getAllPassagesForEvent(event.id);
+      checkpoints = await SupabaseService.instance.getCheckpoints(event.id);
+      passages = await SupabaseService.instance.getAllPassagesForEvent(event.id);
     }
     setState(() {
       _event = event;

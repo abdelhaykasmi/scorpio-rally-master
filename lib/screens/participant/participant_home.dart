@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import '../../models/models.dart';
 import '../../services/auth_provider.dart';
 import '../../services/app_settings_provider.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
 import '../../widgets/common_widgets.dart';
@@ -79,7 +79,7 @@ class _QRCodeTabState extends State<_QRCodeTab> {
   }
 
   Future<void> _load() async {
-    final event = await FirebaseService.instance.getActiveEvent();
+    final event = await SupabaseService.instance.getActiveEvent();
     if (!mounted) return;
     setState(() => _event = event);
     final user = context.read<AuthProvider>().currentUser;
@@ -397,12 +397,12 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
 
   Future<void> _load() async {
     final user = context.read<AuthProvider>().currentUser;
-    final event = await FirebaseService.instance.getActiveEvent();
+    final event = await SupabaseService.instance.getActiveEvent();
     if (user != null && event != null) {
-      final passages = await FirebaseService.instance
+      final passages = await SupabaseService.instance
           .getPassagesForParticipant(user.id, event.id);
       final checkpoints =
-          await FirebaseService.instance.getCheckpoints(event.id);
+          await SupabaseService.instance.getCheckpoints(event.id);
       setState(() {
         _passages = passages;
         _checkpoints = checkpoints;
@@ -641,9 +641,9 @@ class _EventInfoTabState extends State<_EventInfoTab> {
   }
 
   Future<void> _load() async {
-    final event = await FirebaseService.instance.getActiveEvent();
+    final event = await SupabaseService.instance.getActiveEvent();
     if (event != null) {
-      final cps = await FirebaseService.instance.getCheckpoints(event.id);
+      final cps = await SupabaseService.instance.getCheckpoints(event.id);
       if (mounted) setState(() {
         _event = event;
         _checkpoints = cps;

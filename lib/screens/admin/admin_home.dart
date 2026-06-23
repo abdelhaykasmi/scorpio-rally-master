@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/models.dart';
 import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'admin_settings_screen.dart';
@@ -89,14 +89,14 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
   }
 
   Future<void> _load() async {
-    final event = await FirebaseService.instance.getActiveEvent();
-    final participants = await FirebaseService.instance.getParticipants();
-    final organizers = await FirebaseService.instance.getOrganizers();
+    final event = await SupabaseService.instance.getActiveEvent();
+    final participants = await SupabaseService.instance.getParticipants();
+    final organizers = await SupabaseService.instance.getOrganizers();
     int passages = 0;
     int cps = 0;
     if (event != null) {
-      final ps = await FirebaseService.instance.getAllPassagesForEvent(event.id);
-      final cpList = await FirebaseService.instance.getCheckpoints(event.id);
+      final ps = await SupabaseService.instance.getAllPassagesForEvent(event.id);
+      final cpList = await SupabaseService.instance.getCheckpoints(event.id);
       passages = ps.length;
       cps = cpList.length;
     }

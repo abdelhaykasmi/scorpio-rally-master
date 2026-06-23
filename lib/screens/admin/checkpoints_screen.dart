@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
-import '../../services/firebase_service.dart';
+import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -25,8 +25,8 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
   }
 
   Future<void> _load() async {
-    final cps = await FirebaseService.instance.getCheckpoints(widget.event.id);
-    final orgs = await FirebaseService.instance.getOrganizers();
+    final cps = await SupabaseService.instance.getCheckpoints(widget.event.id);
+    final orgs = await SupabaseService.instance.getOrganizers();
     setState(() {
       _checkpoints = cps;
       _organizers = orgs;
@@ -56,7 +56,7 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
       ),
     );
     if (confirm == true) {
-      await FirebaseService.instance.deleteCheckpoint(cp.id);
+      await SupabaseService.instance.deleteCheckpoint(cp.id);
       await _load();
     }
   }
@@ -76,9 +76,9 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         nextOrder: _checkpoints.length + 1,
         onSaved: (cp) async {
           if (existing == null) {
-            await FirebaseService.instance.createCheckpoint(cp);
+            await SupabaseService.instance.createCheckpoint(cp);
           } else {
-            await FirebaseService.instance.updateCheckpoint(cp);
+            await SupabaseService.instance.updateCheckpoint(cp);
           }
           await _load();
         },
@@ -134,7 +134,7 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
                           assignedOrganizerName: _checkpoints[i].assignedOrganizerName,
                         );
                         _checkpoints[i] = updated;
-                        FirebaseService.instance.updateCheckpoint(updated);
+                        SupabaseService.instance.updateCheckpoint(updated);
                       }
                     });
                   },

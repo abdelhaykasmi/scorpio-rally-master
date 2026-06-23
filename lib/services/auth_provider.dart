@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
-import 'firebase_service.dart';
+import 'supabase_service.dart';
 import 'local_storage_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -32,7 +32,8 @@ class AuthProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final user = await FirebaseService.instance.signIn(username.trim(), password.trim());
+    final user = await SupabaseService.instance.signIn(
+        username.trim(), password.trim());
 
     if (user != null) {
       _currentUser = user;
