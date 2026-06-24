@@ -35,24 +35,36 @@ class _UsersScreenState extends State<UsersScreen>
 
   Future<void> _load() async {
     try {
-      List<AppUser> all;
-      try {
-        all = await SupabaseService.instance.getUsers();
-        // Cache locally so offline works
-        await LocalStorageService.instance.cacheUsers(all);
-      } catch (_) {
-        // Supabase unreachable — use local cache
-        all = await LocalStorageService.instance.getCachedUsers();
-      }
+      // Fetch from Supabase and MERGE into local cache (never overwrite with empty)
+      final remote = await SupabaseService.instance.getUsers();
+      await LocalStorageService.instance.mergeUsers(remote);
+      // Always read from local cache as source of truth
+      final all = await LocalStorageService.instance.getCachedUsers();
       if (mounted) {
         setState(() {
-          _participants = all.where((u) => u.role == UserRole.participant).toList();
-          _organizers = all.where((u) => u.role == UserRole.organizer).toList();
+          _participants =
+              all.where((u) => u.role == UserRole.participant).toList();
+          _organizers =
+              all.where((u) => u.role == UserRole.organizer).toList();
           _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      // Supabase completely unreachable — read local cache directly
+      try {
+        final all = await LocalStorageService.instance.getCachedUsers();
+        if (mounted) {
+          setState(() {
+            _participants =
+                all.where((u) => u.role == UserRole.participant).toList();
+            _organizers =
+                all.where((u) => u.role == UserRole.organizer).toList();
+            _loading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _loading = false);
+      }
     }
   }
 

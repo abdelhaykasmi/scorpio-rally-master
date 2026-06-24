@@ -29,14 +29,11 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Future<void> _load() async {
     try {
-      List<RallyEvent> events;
-      try {
-        events = await SupabaseService.instance.getEvents();
-        // Cache for offline use
-        await LocalStorageService.instance.cacheEvents(events);
-      } catch (_) {
-        events = await LocalStorageService.instance.getCachedEvents();
-      }
+      // Merge Supabase events into local cache (never overwrites with empty)
+      final remote = await SupabaseService.instance.getEvents();
+      await LocalStorageService.instance.mergeEvents(remote);
+      // Always read from local cache as source of truth
+      final events = await LocalStorageService.instance.getCachedEvents();
       if (mounted) {
         setState(() {
           _events = events..sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -44,7 +41,18 @@ class _EventsScreenState extends State<EventsScreen> {
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      // Supabase completely unreachable — read local cache directly
+      try {
+        final events = await LocalStorageService.instance.getCachedEvents();
+        if (mounted) {
+          setState(() {
+            _events = events..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+            _loading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _loading = false);
+      }
     }
   }
 

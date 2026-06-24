@@ -5,6 +5,7 @@ import '../../models/models.dart';
 import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/supabase_service.dart';
+import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
 import '../../widgets/common_widgets.dart';
@@ -32,15 +33,34 @@ class _OrganizerHomeState extends State<OrganizerHome> {
 
   Future<void> _loadData() async {
     final user = context.read<AuthProvider>().currentUser;
-    final event = await SupabaseService.instance.getActiveEvent();
-    if (user?.assignedCheckpointId != null && event != null) {
-      final checkpoints =
-          await SupabaseService.instance.getCheckpoints(event.id);
-      Checkpoint? cp;
+    try {
+      // ── Active event (Supabase → local cache fallback) ────
+      RallyEvent? event;
       try {
-        cp = checkpoints
-            .firstWhere((c) => c.id == user!.assignedCheckpointId);
+        event = await SupabaseService.instance.getActiveEvent();
+        if (event != null) {
+          await LocalStorageService.instance.mergeEvents([event]);
+        }
       } catch (_) {}
+      event ??= await LocalStorageService.instance.getActiveEvent();
+
+      // ── Assigned checkpoint ───────────────────────────────
+      Checkpoint? cp;
+      if (user?.assignedCheckpointId != null && event != null) {
+        // Try Supabase checkpoints first, merge into cache
+        final remoteCps =
+            await SupabaseService.instance.getCheckpoints(event.id);
+        await LocalStorageService.instance
+            .mergeCheckpoints(remoteCps, event.id);
+        // Read from local cache (guaranteed to have locally-created CPs)
+        final checkpoints = await LocalStorageService.instance
+            .getCachedCheckpoints(event.id);
+        try {
+          cp = checkpoints
+              .firstWhere((c) => c.id == user!.assignedCheckpointId);
+        } catch (_) {}
+      }
+
       final pending = await SupabaseService.instance.getPendingCount();
       if (mounted) {
         setState(() {
@@ -49,6 +69,26 @@ class _OrganizerHomeState extends State<OrganizerHome> {
           _pendingCount = pending;
         });
       }
+    } catch (_) {
+      // Completely offline — read everything from local cache
+      try {
+        final event = await LocalStorageService.instance.getActiveEvent();
+        Checkpoint? cp;
+        if (user?.assignedCheckpointId != null && event != null) {
+          final checkpoints = await LocalStorageService.instance
+              .getCachedCheckpoints(event.id);
+          try {
+            cp = checkpoints
+                .firstWhere((c) => c.id == user!.assignedCheckpointId);
+          } catch (_) {}
+        }
+        if (mounted) {
+          setState(() {
+            _checkpoint = cp;
+            _event = event;
+          });
+        }
+      } catch (_) {}
     }
   }
 

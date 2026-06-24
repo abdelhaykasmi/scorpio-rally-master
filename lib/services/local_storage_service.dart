@@ -113,10 +113,28 @@ class LocalStorageService {
   }
 
   // ── Cached Users ──────────────────────────────────────────
+
+  /// Full replace — use only when you have the complete authoritative list.
   Future<void> cacheUsers(List<AppUser> users) async {
     final prefs = await SharedPreferences.getInstance();
     final list = users.map((u) => u.toMap()..['id'] = u.id).toList();
     await prefs.setString(_usersKey, jsonEncode(list));
+  }
+
+  /// Merge Supabase users into local cache.
+  /// - Supabase records overwrite matching local records (same id).
+  /// - Local-only records (not in Supabase) are preserved.
+  /// - Only runs when [remote] is non-empty (never wipes cache with empty list).
+  Future<void> mergeUsers(List<AppUser> remote) async {
+    if (remote.isEmpty) return;
+    final local = await getCachedUsers();
+    final remoteIds = {for (final u in remote) u.id};
+    // Keep local-only records; replace with remote where id matches
+    final merged = [
+      ...remote,
+      ...local.where((u) => !remoteIds.contains(u.id)),
+    ];
+    await cacheUsers(merged);
   }
 
   Future<List<AppUser>> getCachedUsers() async {
@@ -134,6 +152,19 @@ class LocalStorageService {
   }
 
   // ── Cached Events ─────────────────────────────────────────
+
+  /// Merge Supabase events into local cache (non-destructive).
+  Future<void> mergeEvents(List<RallyEvent> remote) async {
+    if (remote.isEmpty) return;
+    final local = await getCachedEvents();
+    final remoteIds = {for (final e in remote) e.id};
+    final merged = [
+      ...remote,
+      ...local.where((e) => !remoteIds.contains(e.id)),
+    ];
+    await cacheEvents(merged);
+  }
+
   Future<void> cacheEvents(List<RallyEvent> events) async {
     final prefs = await SharedPreferences.getInstance();
     final list = events.map((e) => e.toMap()..['id'] = e.id).toList();
@@ -164,10 +195,58 @@ class LocalStorageService {
   }
 
   // ── Cached Checkpoints ────────────────────────────────────
-  Future<void> cacheCheckpoints(List<Checkpoint> checkpoints) async {
+
+  /// Merge Supabase checkpoints into local cache for a specific event.
+  /// - Remote records overwrite matching local records (same id).
+  /// - Local-only records for the same event are preserved.
+  /// - Checkpoints from OTHER events are never touched.
+  /// - Only runs when [remote] is non-empty.
+  Future<void> mergeCheckpoints(List<Checkpoint> remote, String eventId) async {
+    if (remote.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
-    final list = checkpoints.map((c) => c.toMap()..['id'] = c.id).toList();
-    await prefs.setString(_checkpointsKey, jsonEncode(list));
+    final str = prefs.getString(_checkpointsKey) ?? '[]';
+    List<Checkpoint> allCached = [];
+    try {
+      final list = jsonDecode(str) as List;
+      allCached = list
+          .map((e) => Checkpoint.fromMap(
+              Map<String, dynamic>.from(e as Map), e['id']?.toString() ?? ''))
+          .toList();
+    } catch (_) {}
+
+    final remoteIds = {for (final c in remote) c.id};
+    // Keep: other-event checkpoints + local-only same-event checkpoints + remote
+    final merged = [
+      ...allCached.where((c) => c.eventId != eventId),          // other events unchanged
+      ...remote,                                                  // remote wins for this event
+      ...allCached.where(
+          (c) => c.eventId == eventId && !remoteIds.contains(c.id)), // local-only preserved
+    ];
+    final encoded = merged.map((c) => c.toMap()..['id'] = c.id).toList();
+    await prefs.setString(_checkpointsKey, jsonEncode(encoded));
+  }
+
+  /// Full replace for a specific event's checkpoints (used when writing local changes).
+  /// Preserves checkpoints from other events.
+  Future<void> cacheCheckpoints(List<Checkpoint> checkpoints) async {
+    if (checkpoints.isEmpty) return; // never wipe with empty list
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString(_checkpointsKey) ?? '[]';
+    List<Checkpoint> others = [];
+    try {
+      if (checkpoints.isNotEmpty) {
+        final eventId = checkpoints.first.eventId;
+        final list = jsonDecode(str) as List;
+        others = list
+            .map((e) => Checkpoint.fromMap(
+                Map<String, dynamic>.from(e as Map), e['id']?.toString() ?? ''))
+            .where((c) => c.eventId != eventId)
+            .toList();
+      }
+    } catch (_) {}
+    final merged = [...others, ...checkpoints];
+    final encoded = merged.map((c) => c.toMap()..['id'] = c.id).toList();
+    await prefs.setString(_checkpointsKey, jsonEncode(encoded));
   }
 
   Future<List<Checkpoint>> getCachedCheckpoints(String eventId) async {

@@ -30,32 +30,27 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
     if (mounted) setState(() { _loading = true; _error = null; });
     try {
       // ── Load checkpoints ─────────────────────────────────
-      List<Checkpoint> cps;
-      try {
-        cps = await SupabaseService.instance.getCheckpoints(widget.event.id);
-        await LocalStorageService.instance.cacheCheckpoints(cps);
-      } catch (_) {
-        cps = await LocalStorageService.instance
-            .getCachedCheckpoints(widget.event.id);
-      }
+      // Rule: NEVER overwrite local cache with an empty Supabase response.
+      // Supabase may return [] because of RLS, network, or nothing inserted yet —
+      // that must not destroy checkpoints the user just created locally.
+      final remoteCheckpoints =
+          await SupabaseService.instance.getCheckpoints(widget.event.id);
+      // mergeCheckpoints is a no-op when remoteCheckpoints is empty
+      await LocalStorageService.instance
+          .mergeCheckpoints(remoteCheckpoints, widget.event.id);
+      // Always read from local cache as the single source of truth
+      final cps = await LocalStorageService.instance
+          .getCachedCheckpoints(widget.event.id);
 
       // ── Load organizers ───────────────────────────────────
-      List<AppUser> orgs;
-      try {
-        orgs = await SupabaseService.instance.getOrganizers();
-        if (orgs.isEmpty) {
-          // Supabase returned empty (no organizers created yet) —
-          // also check local cache for any the user created while offline
-          final cached = await LocalStorageService.instance.getCachedUsers();
-          final localOrgs = cached
-              .where((u) => u.role == UserRole.organizer && u.isActive)
-              .toList();
-          if (localOrgs.isNotEmpty) orgs = localOrgs;
-        }
-      } catch (_) {
-        final all = await LocalStorageService.instance.getCachedUsers();
-        orgs = all.where((u) => u.role == UserRole.organizer && u.isActive).toList();
-      }
+      final remoteOrgs = await SupabaseService.instance.getOrganizers();
+      // mergeUsers is a no-op when remoteOrgs is empty
+      await LocalStorageService.instance.mergeUsers(remoteOrgs);
+      // Read all users from local cache and filter organizers
+      final allUsers = await LocalStorageService.instance.getCachedUsers();
+      final orgs = allUsers
+          .where((u) => u.role == UserRole.organizer && u.isActive)
+          .toList();
 
       // ── Resolve organizer names on checkpoints ────────────
       final orgMap = {for (final o in orgs) o.id: o};
@@ -79,11 +74,28 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = 'Failed to load: $e';
-        });
+      // Last-resort fallback: show whatever is in local cache
+      try {
+        final cps = await LocalStorageService.instance
+            .getCachedCheckpoints(widget.event.id);
+        final allUsers = await LocalStorageService.instance.getCachedUsers();
+        final orgs = allUsers
+            .where((u) => u.role == UserRole.organizer && u.isActive)
+            .toList();
+        if (mounted) {
+          setState(() {
+            _checkpoints = cps;
+            _organizers = orgs;
+            _loading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = 'Failed to load checkpoints. Please retry.';
+          });
+        }
       }
     }
   }

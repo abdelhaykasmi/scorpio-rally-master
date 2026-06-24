@@ -31,57 +31,34 @@ class _LiveDashboardScreenState extends State<LiveDashboardScreen> {
     if (mounted) setState(() => _loading = true);
     try {
       // ── Active event ─────────────────────────────────────
-      RallyEvent? event;
-      try {
-        event = await SupabaseService.instance.getActiveEvent();
-        if (event != null) {
-          await LocalStorageService.instance.cacheEvents([event]);
-        }
-      } catch (_) {
-        event = await LocalStorageService.instance.getActiveEvent();
+      final remoteEvent = await SupabaseService.instance.getActiveEvent();
+      if (remoteEvent != null) {
+        await LocalStorageService.instance.mergeEvents([remoteEvent]);
       }
+      final event = remoteEvent ?? await LocalStorageService.instance.getActiveEvent();
 
-      // ── Participants ──────────────────────────────────────
-      List<AppUser> participants;
-      try {
-        participants = await SupabaseService.instance.getParticipants();
-        // Merge with cached users so local creates also show
-        if (participants.isEmpty) {
-          final cached = await LocalStorageService.instance.getCachedUsers();
-          participants = cached
-              .where((u) => u.role == UserRole.participant && u.isActive)
-              .toList();
-        } else {
-          await LocalStorageService.instance.cacheUsers(participants);
-        }
-      } catch (_) {
-        final cached = await LocalStorageService.instance.getCachedUsers();
-        participants = cached
-            .where((u) => u.role == UserRole.participant && u.isActive)
-            .toList();
-      }
+      // ── Participants (merge — never overwrite with empty) ──
+      final remoteParticipants = await SupabaseService.instance.getParticipants();
+      await LocalStorageService.instance.mergeUsers(remoteParticipants);
+      final allUsers = await LocalStorageService.instance.getCachedUsers();
+      final participants = allUsers
+          .where((u) => u.role == UserRole.participant && u.isActive)
+          .toList();
 
       // ── Checkpoints & passages ────────────────────────────
       List<Checkpoint> checkpoints = [];
       List<CheckpointPassage> passages = [];
       if (event != null) {
-        // getCheckpoints() already has try/catch in service, returns []
-        checkpoints =
-            await SupabaseService.instance.getCheckpoints(event.id);
-        if (checkpoints.isEmpty) {
-          checkpoints = await LocalStorageService.instance
-              .getCachedCheckpoints(event.id);
-        } else {
-          await LocalStorageService.instance.cacheCheckpoints(checkpoints);
-        }
+        final remoteCps = await SupabaseService.instance.getCheckpoints(event.id);
+        await LocalStorageService.instance.mergeCheckpoints(remoteCps, event.id);
+        checkpoints = await LocalStorageService.instance
+            .getCachedCheckpoints(event.id);
 
         try {
-          passages = await SupabaseService.instance
-              .getAllPassagesForEvent(event.id);
+          passages = await SupabaseService.instance.getAllPassagesForEvent(event.id);
         } catch (_) {
-          final local =
-              await LocalStorageService.instance.getAllLocalPassages();
-          passages = local.where((p) => p.eventId == event!.id).toList();
+          final local = await LocalStorageService.instance.getAllLocalPassages();
+          passages = local.where((p) => p.eventId == event.id).toList();
         }
       }
 
@@ -89,15 +66,41 @@ class _LiveDashboardScreenState extends State<LiveDashboardScreen> {
         setState(() {
           _event = event;
           _participants = participants
-            ..sort(
-                (a, b) => (a.bibNumber ?? '').compareTo(b.bibNumber ?? ''));
+            ..sort((a, b) => (a.bibNumber ?? '').compareTo(b.bibNumber ?? ''));
           _checkpoints = checkpoints;
           _passages = passages;
           _loading = false;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _loading = false);
+      // Last-resort: show whatever is in local cache
+      try {
+        final event = await LocalStorageService.instance.getActiveEvent();
+        final allUsers = await LocalStorageService.instance.getCachedUsers();
+        final participants = allUsers
+            .where((u) => u.role == UserRole.participant && u.isActive)
+            .toList();
+        List<Checkpoint> checkpoints = [];
+        List<CheckpointPassage> passages = [];
+        if (event != null) {
+          checkpoints = await LocalStorageService.instance
+              .getCachedCheckpoints(event.id);
+          final local = await LocalStorageService.instance.getAllLocalPassages();
+          passages = local.where((p) => p.eventId == event.id).toList();
+        }
+        if (mounted) {
+          setState(() {
+            _event = event;
+            _participants = participants
+              ..sort((a, b) => (a.bibNumber ?? '').compareTo(b.bibNumber ?? ''));
+            _checkpoints = checkpoints;
+            _passages = passages;
+            _loading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _loading = false);
+      }
     }
   }
 
