@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
 import '../../services/supabase_service.dart';
+import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -17,6 +18,7 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
   List<Checkpoint> _checkpoints = [];
   List<AppUser> _organizers = [];
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -25,13 +27,61 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
   }
 
   Future<void> _load() async {
-    final cps = await SupabaseService.instance.getCheckpoints(widget.event.id);
-    final orgs = await SupabaseService.instance.getOrganizers();
-    setState(() {
-      _checkpoints = cps;
-      _organizers = orgs;
-      _loading = false;
-    });
+    if (mounted) setState(() { _loading = true; _error = null; });
+    try {
+      // ── Load checkpoints ─────────────────────────────────
+      List<Checkpoint> cps;
+      try {
+        cps = await SupabaseService.instance.getCheckpoints(widget.event.id);
+        await LocalStorageService.instance.cacheCheckpoints(cps);
+      } catch (_) {
+        cps = await LocalStorageService.instance
+            .getCachedCheckpoints(widget.event.id);
+      }
+
+      // ── Load organizers ───────────────────────────────────
+      List<AppUser> orgs;
+      try {
+        orgs = await SupabaseService.instance.getOrganizers();
+        // Cache all users so future local lookups work
+        final allCached = await LocalStorageService.instance.getCachedUsers();
+        if (allCached.isEmpty) {
+          await LocalStorageService.instance.cacheUsers(orgs);
+        }
+      } catch (_) {
+        final all = await LocalStorageService.instance.getCachedUsers();
+        orgs = all.where((u) => u.role == UserRole.organizer && u.isActive).toList();
+      }
+
+      // ── Resolve organizer names on checkpoints ────────────
+      final orgMap = {for (final o in orgs) o.id: o};
+      final resolved = cps.map((cp) {
+        if (cp.assignedOrganizerId != null &&
+            cp.assignedOrganizerName == null) {
+          final org = orgMap[cp.assignedOrganizerId];
+          if (org != null) {
+            return cp.copyWith(
+                assignedOrganizerName: org.fullName ?? org.username);
+          }
+        }
+        return cp;
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _checkpoints = resolved;
+          _organizers = orgs;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Failed to load: $e';
+        });
+      }
+    }
   }
 
   void _addCheckpoint() => _showDialog(null);
@@ -41,8 +91,11 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete Checkpoint'),
-        content: Text('Delete "${cp.name}"?'),
+        backgroundColor: AppColors.surface,
+        title: const Text('Delete Checkpoint',
+            style: TextStyle(color: AppColors.textPrimary)),
+        content: Text('Delete "${cp.name}"?',
+            style: const TextStyle(color: AppColors.textSecondary)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -55,10 +108,18 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         ],
       ),
     );
-    if (confirm == true) {
+    if (confirm != true) return;
+
+    try {
       await SupabaseService.instance.deleteCheckpoint(cp.id);
-      await _load();
+    } catch (_) {
+      // Remove from local cache
+      final cached = await LocalStorageService.instance
+          .getCachedCheckpoints(widget.event.id);
+      await LocalStorageService.instance
+          .cacheCheckpoints(cached.where((c) => c.id != cp.id).toList());
     }
+    await _load();
   }
 
   void _showDialog(Checkpoint? existing) {
@@ -75,10 +136,24 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         organizers: _organizers,
         nextOrder: _checkpoints.length + 1,
         onSaved: (cp) async {
-          if (existing == null) {
-            await SupabaseService.instance.createCheckpoint(cp);
-          } else {
-            await SupabaseService.instance.updateCheckpoint(cp);
+          try {
+            if (existing == null) {
+              await SupabaseService.instance.createCheckpoint(cp);
+            } else {
+              await SupabaseService.instance.updateCheckpoint(cp);
+            }
+          } catch (_) {
+            // Write failed — update local cache so UI reflects the change
+            final cached = await LocalStorageService.instance
+                .getCachedCheckpoints(widget.event.id);
+            List<Checkpoint> updated;
+            if (existing == null) {
+              updated = [...cached, cp];
+            } else {
+              updated =
+                  cached.map((c) => c.id == cp.id ? cp : c).toList();
+            }
+            await LocalStorageService.instance.cacheCheckpoints(updated);
           }
           await _load();
         },
@@ -101,45 +176,65 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
-          : _checkpoints.isEmpty
-              ? EmptyState(
-                  icon: Icons.flag,
-                  title: 'No checkpoints yet',
-                  subtitle: 'Add checkpoints for this event',
-                  action: ElevatedButton.icon(
-                    onPressed: _addCheckpoint,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Checkpoint'),
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.accent))
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline,
+                          color: AppColors.error, size: 48),
+                      const SizedBox(height: 16),
+                      Text(_error!,
+                          style: const TextStyle(color: AppColors.textMuted),
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                          onPressed: _load, child: const Text('Retry')),
+                    ],
                   ),
                 )
-              : ReorderableListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _checkpoints.length,
-                  onReorder: (oldIndex, newIndex) async {
-                    setState(() {
-                      if (newIndex > oldIndex) newIndex--;
-                      final cp = _checkpoints.removeAt(oldIndex);
-                      _checkpoints.insert(newIndex, cp);
-                      for (int i = 0; i < _checkpoints.length; i++) {
-                        final updated = Checkpoint(
-                          id: _checkpoints[i].id,
-                          eventId: _checkpoints[i].eventId,
-                          name: _checkpoints[i].name,
-                          order: i + 1,
-                          description: _checkpoints[i].description,
-                          latitude: _checkpoints[i].latitude,
-                          longitude: _checkpoints[i].longitude,
-                          assignedOrganizerId: _checkpoints[i].assignedOrganizerId,
-                          assignedOrganizerName: _checkpoints[i].assignedOrganizerName,
-                        );
-                        _checkpoints[i] = updated;
-                        SupabaseService.instance.updateCheckpoint(updated);
-                      }
-                    });
-                  },
-                  itemBuilder: (_, i) => _buildRow(_checkpoints[i], i),
-                ),
+              : _checkpoints.isEmpty
+                  ? EmptyState(
+                      icon: Icons.flag,
+                      title: 'No checkpoints yet',
+                      subtitle: 'Add checkpoints for this event',
+                      action: ElevatedButton.icon(
+                        onPressed: _addCheckpoint,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add Checkpoint'),
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      color: AppColors.accent,
+                      child: ReorderableListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _checkpoints.length,
+                        onReorder: (oldIndex, newIndex) async {
+                          setState(() {
+                            if (newIndex > oldIndex) newIndex--;
+                            final cp = _checkpoints.removeAt(oldIndex);
+                            _checkpoints.insert(newIndex, cp);
+                            for (int i = 0; i < _checkpoints.length; i++) {
+                              _checkpoints[i] =
+                                  _checkpoints[i].copyWith(order: i + 1);
+                            }
+                          });
+                          // Persist new order
+                          for (final cp in _checkpoints) {
+                            try {
+                              await SupabaseService.instance
+                                  .updateCheckpoint(cp);
+                            } catch (_) {}
+                          }
+                          await LocalStorageService.instance
+                              .cacheCheckpoints(_checkpoints);
+                        },
+                        itemBuilder: (_, i) => _buildRow(_checkpoints[i], i),
+                      ),
+                    ),
     );
   }
 
@@ -163,8 +258,8 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: AppColors.accent.withValues(alpha: 0.15),
-              border:
-                  Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
+              border: Border.all(
+                  color: AppColors.accent.withValues(alpha: 0.4)),
             ),
             child: Center(
               child: Text('${cp.order}',
@@ -188,27 +283,45 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
                     )),
                 if (cp.assignedOrganizerName != null)
                   Row(children: [
-                    const Icon(Icons.person, color: AppColors.textMuted, size: 12),
+                    const Icon(Icons.person,
+                        color: AppColors.textMuted, size: 12),
                     const SizedBox(width: 4),
                     Text(cp.assignedOrganizerName!,
                         style: const TextStyle(
                             color: AppColors.textMuted, fontSize: 11)),
+                  ])
+                else if (cp.assignedOrganizerId != null)
+                  Row(children: [
+                    const Icon(Icons.person_outline,
+                        color: AppColors.textMuted, size: 12),
+                    const SizedBox(width: 4),
+                    const Text('Organizer assigned',
+                        style: TextStyle(
+                            color: AppColors.textMuted, fontSize: 11)),
                   ]),
-                if (cp.latitude != null)
+                if (cp.latitude != null && cp.longitude != null)
                   Row(children: [
                     const Icon(Icons.location_on,
                         color: AppColors.textMuted, size: 12),
                     const SizedBox(width: 4),
                     Text(
-                        '${cp.latitude!.toStringAsFixed(4)}, ${cp.longitude!.toStringAsFixed(4)}',
+                        '${cp.latitude!.toStringAsFixed(4)}, '
+                        '${cp.longitude!.toStringAsFixed(4)}',
                         style: const TextStyle(
                             color: AppColors.textMuted, fontSize: 10)),
                   ]),
+                if (cp.description != null && cp.description!.isNotEmpty)
+                  Text(cp.description!,
+                      style: const TextStyle(
+                          color: AppColors.textSecondary, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.edit, color: AppColors.textMuted, size: 18),
+            icon:
+                const Icon(Icons.edit, color: AppColors.textMuted, size: 18),
             onPressed: () => _editCheckpoint(cp),
           ),
           IconButton(
@@ -222,6 +335,7 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
   }
 }
 
+// ── Checkpoint Form Sheet ─────────────────────────────────────
 class _CheckpointFormSheet extends StatefulWidget {
   final Checkpoint? existing;
   final RallyEvent event;
@@ -248,17 +362,24 @@ class _CheckpointFormSheetState extends State<_CheckpointFormSheet> {
   late final TextEditingController _latCtrl;
   late final TextEditingController _lonCtrl;
   String? _selectedOrganizerId;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
-    _descCtrl = TextEditingController(text: widget.existing?.description ?? '');
+    _descCtrl =
+        TextEditingController(text: widget.existing?.description ?? '');
     _latCtrl = TextEditingController(
         text: widget.existing?.latitude?.toString() ?? '');
     _lonCtrl = TextEditingController(
         text: widget.existing?.longitude?.toString() ?? '');
     _selectedOrganizerId = widget.existing?.assignedOrganizerId;
+    // Validate existing organizer ID is still in list
+    if (_selectedOrganizerId != null &&
+        !widget.organizers.any((o) => o.id == _selectedOrganizerId)) {
+      _selectedOrganizerId = null;
+    }
   }
 
   @override
@@ -270,28 +391,36 @@ class _CheckpointFormSheetState extends State<_CheckpointFormSheet> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_saving) return;
+    setState(() => _saving = true);
+
     final org = widget.organizers
         .where((o) => o.id == _selectedOrganizerId)
         .firstOrNull;
+
     final cp = Checkpoint(
       id: widget.existing?.id ?? const Uuid().v4(),
       eventId: widget.event.id,
       name: _nameCtrl.text.trim(),
       order: widget.existing?.order ?? widget.nextOrder,
-      description: _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
-      latitude: double.tryParse(_latCtrl.text),
-      longitude: double.tryParse(_lonCtrl.text),
+      description: _descCtrl.text.trim().isEmpty
+          ? null
+          : _descCtrl.text.trim(),
+      latitude: double.tryParse(_latCtrl.text.trim()),
+      longitude: double.tryParse(_lonCtrl.text.trim()),
       assignedOrganizerId: _selectedOrganizerId,
       assignedOrganizerName: org?.fullName ?? org?.username,
     );
-    widget.onSaved(cp);
+
     if (mounted) Navigator.of(context).pop();
+    await widget.onSaved(cp);
   }
 
   @override
   Widget build(BuildContext context) {
+    final isNew = widget.existing == null;
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -302,13 +431,13 @@ class _CheckpointFormSheetState extends State<_CheckpointFormSheet> {
           key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              // ── Header ───────────────────────────────────
               Row(
                 children: [
                   Text(
-                    widget.existing == null
-                        ? 'ADD CHECKPOINT'
-                        : 'EDIT CHECKPOINT',
+                    isNew ? 'ADD CHECKPOINT' : 'EDIT CHECKPOINT',
                     style: const TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 16,
@@ -317,22 +446,28 @@ class _CheckpointFormSheetState extends State<_CheckpointFormSheet> {
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close, color: AppColors.textMuted),
+                    icon: const Icon(Icons.close,
+                        color: AppColors.textMuted),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
               const SizedBox(height: 20),
+
+              // ── Name ─────────────────────────────────────
               TextFormField(
                 controller: _nameCtrl,
                 style: const TextStyle(color: AppColors.textPrimary),
                 decoration: const InputDecoration(
-                  labelText: 'Checkpoint Name',
+                  labelText: 'Checkpoint Name *',
                   prefixIcon: Icon(Icons.flag),
                 ),
-                validator: (v) => v!.isEmpty ? 'Name required' : null,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Name required' : null,
               ),
               const SizedBox(height: 14),
+
+              // ── Description ───────────────────────────────
               TextFormField(
                 controller: _descCtrl,
                 style: const TextStyle(color: AppColors.textPrimary),
@@ -342,6 +477,8 @@ class _CheckpointFormSheetState extends State<_CheckpointFormSheet> {
                 ),
               ),
               const SizedBox(height: 14),
+
+              // ── Coordinates ───────────────────────────────
               Row(
                 children: [
                   Expanded(
@@ -372,41 +509,85 @@ class _CheckpointFormSheetState extends State<_CheckpointFormSheet> {
                 ],
               ),
               const SizedBox(height: 14),
-              DropdownButtonFormField<String>(
-                value: _selectedOrganizerId,
-                style: const TextStyle(color: AppColors.textPrimary),
-                dropdownColor: AppColors.surface,
-                decoration: const InputDecoration(
-                  labelText: 'Assign Organizer (optional)',
-                  prefixIcon: Icon(Icons.person),
-                ),
-                items: [
-                  const DropdownMenuItem(
+
+              // ── Organizer Dropdown ────────────────────────
+              if (widget.organizers.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: AppColors.warning.withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber,
+                          color: AppColors.warning, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'No organizers found. Create organizer users first.',
+                          style: TextStyle(
+                              color: AppColors.warning, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedOrganizerId,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  dropdownColor: AppColors.surface,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Assign Organizer (optional)',
+                    prefixIcon: Icon(Icons.shield),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String>(
                       value: null,
-                      child: Text('None',
-                          style: TextStyle(color: AppColors.textMuted))),
-                  ...widget.organizers.map((o) => DropdownMenuItem(
-                        value: o.id,
-                        child: Text(o.fullName ?? o.username,
+                      child: Text('— None —',
+                          style:
+                              TextStyle(color: AppColors.textMuted)),
+                    ),
+                    ...widget.organizers.map((o) => DropdownMenuItem<String>(
+                          value: o.id,
+                          child: Text(
+                            o.fullName != null && o.fullName!.isNotEmpty
+                                ? '${o.fullName} (@${o.username})'
+                                : '@${o.username}',
                             style: const TextStyle(
-                                color: AppColors.textPrimary)),
-                      )),
-                ],
-                onChanged: (v) => setState(() => _selectedOrganizerId = v),
-              ),
-              const SizedBox(height: 24),
+                                color: AppColors.textPrimary),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _selectedOrganizerId = v),
+                ),
+              const SizedBox(height: 28),
+
+              // ── Save Button ───────────────────────────────
               SizedBox(
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _save,
-                  child: Text(
-                    widget.existing == null ? 'ADD CHECKPOINT' : 'SAVE',
-                    style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.5),
-                  ),
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : Text(
+                          isNew ? 'ADD CHECKPOINT' : 'SAVE CHANGES',
+                          style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.5),
+                        ),
                 ),
               ),
             ],

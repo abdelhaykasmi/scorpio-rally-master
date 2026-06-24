@@ -373,12 +373,16 @@ class SupabaseService {
   }
 
   Future<List<AppUser>> getOrganizers() async {
-    final res = await _sb
-        .from('app_users')
-        .select()
-        .eq('role', 'organizer')
-        .eq('is_active', true);
-    return (res as List).map((r) => _userFromRow(r as Map<String, dynamic>)).toList();
+    try {
+      final res = await _sb
+          .from('app_users')
+          .select()
+          .eq('role', 'organizer')
+          .eq('is_active', true);
+      return (res as List).map((r) => _userFromRow(r as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<AppUser?> getUserById(String id) async {
@@ -444,12 +448,16 @@ class SupabaseService {
 
   // ── Checkpoints CRUD ──────────────────────────────────────
   Future<List<Checkpoint>> getCheckpoints(String eventId) async {
-    final res = await _sb
-        .from('checkpoints')
-        .select()
-        .eq('event_id', eventId)
-        .order('order_index');
-    return (res as List).map((r) => _checkpointFromRow(r as Map<String, dynamic>)).toList();
+    try {
+      final res = await _sb
+          .from('checkpoints')
+          .select()
+          .eq('event_id', eventId)
+          .order('order_index');
+      return (res as List).map((r) => _checkpointFromRow(r as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<void> createCheckpoint(Checkpoint checkpoint) async {
