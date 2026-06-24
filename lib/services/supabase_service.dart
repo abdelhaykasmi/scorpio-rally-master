@@ -40,6 +40,17 @@ class SupabaseService {
     return digest.toString();
   }
 
+  // Pre-computed SHA-256 hashes — no plain passwords in source or compiled JS
+  // admin123
+  static const _hAdmin =
+      '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
+  // marshal123
+  static const _hMarshal =
+      '8cfd286b3293df3dd1cbe45318301887a8ee7dc3ab46815f8172bea976f79ad8';
+  // rider123
+  static const _hRider =
+      'e85978062768502c68bfd953d2d3793cf799b6abe697543512d8bc41bc60e210';
+
   // ── Seed check (one-time) ─────────────────────────────────
   Future<bool> _isSeeded() async {
     try {
@@ -61,35 +72,35 @@ class SupabaseService {
     final usersData = [
       {
         'username': 'admin',
-        'password_hash': hashPassword('admin123'),
+        'password_hash': _hAdmin,
         'role': 'superAdmin',
         'is_active': true,
         'full_name': 'Super Administrator',
       },
       {
         'username': 'marshal1',
-        'password_hash': hashPassword('marshal123'),
+        'password_hash': _hMarshal,
         'role': 'organizer',
         'is_active': true,
         'full_name': 'Marshal Alpha',
       },
       {
         'username': 'marshal2',
-        'password_hash': hashPassword('marshal123'),
+        'password_hash': _hMarshal,
         'role': 'organizer',
         'is_active': true,
         'full_name': 'Marshal Bravo',
       },
       {
         'username': 'marshal3',
-        'password_hash': hashPassword('marshal123'),
+        'password_hash': _hMarshal,
         'role': 'organizer',
         'is_active': true,
         'full_name': 'Marshal Charlie',
       },
       {
         'username': 'rider001',
-        'password_hash': hashPassword('rider123'),
+        'password_hash': _hRider,
         'role': 'participant',
         'is_active': true,
         'full_name': 'Carlos Sainz Jr.',
@@ -103,7 +114,7 @@ class SupabaseService {
       },
       {
         'username': 'rider002',
-        'password_hash': hashPassword('rider123'),
+        'password_hash': _hRider,
         'role': 'participant',
         'is_active': true,
         'full_name': 'Nasser Al-Attiyah',
@@ -117,7 +128,7 @@ class SupabaseService {
       },
       {
         'username': 'rider003',
-        'password_hash': hashPassword('rider123'),
+        'password_hash': _hRider,
         'role': 'participant',
         'is_active': true,
         'full_name': 'Toby Price',
@@ -131,7 +142,7 @@ class SupabaseService {
       },
       {
         'username': 'rider004',
-        'password_hash': hashPassword('rider123'),
+        'password_hash': _hRider,
         'role': 'participant',
         'is_active': true,
         'full_name': 'Adrien Van Beveren',
@@ -145,7 +156,7 @@ class SupabaseService {
       },
       {
         'username': 'rider005',
-        'password_hash': hashPassword('rider123'),
+        'password_hash': _hRider,
         'role': 'participant',
         'is_active': true,
         'full_name': 'Pablo Quintanilla',
