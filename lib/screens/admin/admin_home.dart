@@ -4,6 +4,7 @@ import '../../models/models.dart';
 import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/supabase_service.dart';
+import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'admin_settings_screen.dart';
@@ -22,21 +23,22 @@ class AdminHome extends StatefulWidget {
 class _AdminHomeState extends State<AdminHome> {
   int _currentIndex = 0;
 
-  final _pages = const [
-    _AdminDashboardTab(),
-    EventsScreen(),
-    UsersScreen(),
-    LiveDashboardScreen(),
-    LeaderboardScreen(),
-    AdminSettingsScreen(),
-  ];
+  void _goToTab(int index) => setState(() => _currentIndex = index);
 
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppSettingsProvider>();
+    final pages = [
+      _AdminDashboardTab(onTabChange: _goToTab),
+      const EventsScreen(),
+      const UsersScreen(),
+      const LiveDashboardScreen(),
+      const LeaderboardScreen(),
+      const AdminSettingsScreen(),
+    ];
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: IndexedStack(index: _currentIndex, children: _pages),
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: AppColors.border)),
@@ -68,7 +70,8 @@ class _AdminHomeState extends State<AdminHome> {
 
 // ── Admin Dashboard Home ──────────────────────────────────
 class _AdminDashboardTab extends StatefulWidget {
-  const _AdminDashboardTab();
+  final void Function(int) onTabChange;
+  const _AdminDashboardTab({required this.onTabChange});
 
   @override
   State<_AdminDashboardTab> createState() => _AdminDashboardTabState();
@@ -89,25 +92,64 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
   }
 
   Future<void> _load() async {
-    final event = await SupabaseService.instance.getActiveEvent();
-    final participants = await SupabaseService.instance.getParticipants();
-    final organizers = await SupabaseService.instance.getOrganizers();
-    int passages = 0;
-    int cps = 0;
-    if (event != null) {
-      final ps = await SupabaseService.instance.getAllPassagesForEvent(event.id);
-      final cpList = await SupabaseService.instance.getCheckpoints(event.id);
-      passages = ps.length;
-      cps = cpList.length;
+    try {
+      // Try Supabase first
+      RallyEvent? event;
+      List participants = [];
+      List organizers = [];
+      int passages = 0;
+      int cps = 0;
+
+      try {
+        event = await SupabaseService.instance.getActiveEvent();
+      } catch (_) {
+        event = await LocalStorageService.instance.getActiveEvent();
+      }
+
+      try {
+        participants = await SupabaseService.instance.getParticipants();
+      } catch (_) {
+        final all = await LocalStorageService.instance.getCachedUsers();
+        participants = all.where((u) => u.role == UserRole.participant).toList();
+      }
+
+      try {
+        organizers = await SupabaseService.instance.getOrganizers();
+      } catch (_) {
+        final all = await LocalStorageService.instance.getCachedUsers();
+        organizers = all.where((u) => u.role == UserRole.organizer).toList();
+      }
+
+      if (event != null) {
+        try {
+          final ps = await SupabaseService.instance.getAllPassagesForEvent(event.id);
+          passages = ps.length;
+        } catch (_) {
+          final ps = await LocalStorageService.instance.getAllLocalPassages();
+          passages = ps.where((p) => p.eventId == event!.id).length;
+        }
+        try {
+          final cpList = await SupabaseService.instance.getCheckpoints(event.id);
+          cps = cpList.length;
+        } catch (_) {
+          final cpList = await LocalStorageService.instance.getCachedCheckpoints(event.id);
+          cps = cpList.length;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _activeEvent = event;
+          _participantCount = participants.length;
+          _organizerCount = organizers.length;
+          _totalPassages = passages;
+          _checkpointCount = cps;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
     }
-    setState(() {
-      _activeEvent = event;
-      _participantCount = participants.length;
-      _organizerCount = organizers.length;
-      _totalPassages = passages;
-      _checkpointCount = cps;
-      _loading = false;
-    });
   }
 
   @override
@@ -322,13 +364,20 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
   }
 
   Widget _buildQuickActions(BuildContext context) {
+    // Tab indices: 0=Home, 1=Events, 2=Users, 3=Live, 4=Ranks, 5=Settings
     final actions = [
       _Action('Create Event', Icons.add_circle, AppColors.accent, () {
-        // Navigate to events
+        widget.onTabChange(1); // → Events tab
       }),
-      _Action('Add Participant', Icons.person_add, AppColors.info, () {}),
-      _Action('Add Organizer', Icons.shield, AppColors.warning, () {}),
-      _Action('Export Data', Icons.download, AppColors.success, () {}),
+      _Action('Add Participant', Icons.person_add, AppColors.info, () {
+        widget.onTabChange(2); // → Users tab (participants)
+      }),
+      _Action('Add Organizer', Icons.shield, AppColors.warning, () {
+        widget.onTabChange(2); // → Users tab (organizers)
+      }),
+      _Action('Live Dashboard', Icons.grid_view, AppColors.success, () {
+        widget.onTabChange(3); // → Live tab
+      }),
     ];
     return GridView.count(
       crossAxisCount: 2,

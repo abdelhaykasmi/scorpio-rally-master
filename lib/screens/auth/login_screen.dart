@@ -123,8 +123,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 40),
-                _buildDemoCredentials(),
-                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -203,66 +201,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildDemoCredentials() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(children: [
-            Icon(Icons.info_outline, color: AppColors.textMuted, size: 14),
-            SizedBox(width: 6),
-            Text('DEMO CREDENTIALS',
-                style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.5)),
-          ]),
-          const SizedBox(height: 12),
-          _cred('Super Admin', 'admin', 'admin123'),
-          _cred('Organizer CP1', 'marshal1', 'marshal123'),
-          _cred('Organizer CP2', 'marshal2', 'marshal123'),
-          _cred('Participant #001', 'rider001', 'rider123'),
-          _cred('Participant #002', 'rider002', 'rider123'),
-        ],
-      ),
-    );
-  }
-
-  Widget _cred(String role, String user, String pass) {
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _userCtrl.text = user;
-          _passCtrl.text = pass;
-        });
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 130,
-              child: Text(role,
-                  style: const TextStyle(
-                      color: AppColors.textSecondary, fontSize: 12)),
-            ),
-            Text('$user / $pass',
-                style: const TextStyle(
-                    color: AppColors.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(width: 6),
-            const Icon(Icons.touch_app, color: AppColors.textMuted, size: 12),
-          ],
-        ),
-      ),
-    );
-  }
 }

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
 import '../../services/supabase_service.dart';
+import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'checkpoints_screen.dart';
@@ -27,12 +28,24 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _load() async {
-    final events = await SupabaseService.instance.getEvents();
-    setState(() {
-      _events = events
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      _loading = false;
-    });
+    try {
+      List<RallyEvent> events;
+      try {
+        events = await SupabaseService.instance.getEvents();
+        // Cache for offline use
+        await LocalStorageService.instance.cacheEvents(events);
+      } catch (_) {
+        events = await LocalStorageService.instance.getCachedEvents();
+      }
+      if (mounted) {
+        setState(() {
+          _events = events..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _createEvent() {
@@ -44,7 +57,15 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _activateEvent(RallyEvent event) async {
-    await SupabaseService.instance.activateEvent(event.id);
+    try {
+      await SupabaseService.instance.activateEvent(event.id);
+    } catch (_) {
+      // Update local cache: deactivate all, activate target
+      final cached = await LocalStorageService.instance.getCachedEvents();
+      final updated = cached.map((e) =>
+        e.copyWith(isActive: e.id == event.id)).toList();
+      await LocalStorageService.instance.cacheEvents(updated);
+    }
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,7 +97,13 @@ class _EventsScreenState extends State<EventsScreen> {
       ),
     );
     if (confirm == true) {
-      await SupabaseService.instance.deleteEvent(event.id);
+      try {
+        await SupabaseService.instance.deleteEvent(event.id);
+      } catch (_) {
+        final cached = await LocalStorageService.instance.getCachedEvents();
+        await LocalStorageService.instance.cacheEvents(
+          cached.where((e) => e.id != event.id).toList());
+      }
       await _load();
     }
   }
@@ -92,10 +119,22 @@ class _EventsScreenState extends State<EventsScreen> {
       builder: (_) => _EventFormSheet(
         existing: existing,
         onSaved: (event) async {
-          if (existing == null) {
-            await SupabaseService.instance.createEvent(event);
-          } else {
-            await SupabaseService.instance.updateEvent(event);
+          try {
+            if (existing == null) {
+              await SupabaseService.instance.createEvent(event);
+            } else {
+              await SupabaseService.instance.updateEvent(event);
+            }
+          } catch (_) {
+            // Supabase write failed — update local cache so UI reflects the change
+            final cached = await LocalStorageService.instance.getCachedEvents();
+            List<RallyEvent> updated;
+            if (existing == null) {
+              updated = [...cached, event];
+            } else {
+              updated = cached.map((e) => e.id == event.id ? event : e).toList();
+            }
+            await LocalStorageService.instance.cacheEvents(updated);
           }
           await _load();
         },
