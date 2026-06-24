@@ -43,10 +43,14 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
       List<AppUser> orgs;
       try {
         orgs = await SupabaseService.instance.getOrganizers();
-        // Cache all users so future local lookups work
-        final allCached = await LocalStorageService.instance.getCachedUsers();
-        if (allCached.isEmpty) {
-          await LocalStorageService.instance.cacheUsers(orgs);
+        if (orgs.isEmpty) {
+          // Supabase returned empty (no organizers created yet) —
+          // also check local cache for any the user created while offline
+          final cached = await LocalStorageService.instance.getCachedUsers();
+          final localOrgs = cached
+              .where((u) => u.role == UserRole.organizer && u.isActive)
+              .toList();
+          if (localOrgs.isNotEmpty) orgs = localOrgs;
         }
       } catch (_) {
         final all = await LocalStorageService.instance.getCachedUsers();
@@ -110,15 +114,15 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
     );
     if (confirm != true) return;
 
-    try {
-      await SupabaseService.instance.deleteCheckpoint(cp.id);
-    } catch (_) {
-      // Remove from local cache
-      final cached = await LocalStorageService.instance
-          .getCachedCheckpoints(widget.event.id);
-      await LocalStorageService.instance
-          .cacheCheckpoints(cached.where((c) => c.id != cp.id).toList());
-    }
+    // Always update local cache first (instant UI feedback)
+    final cached = await LocalStorageService.instance
+        .getCachedCheckpoints(widget.event.id);
+    await LocalStorageService.instance
+        .cacheCheckpoints(cached.where((c) => c.id != cp.id).toList());
+
+    // Then try Supabase (fire-and-forget; failure is fine — local cache is truth)
+    SupabaseService.instance.deleteCheckpoint(cp.id).catchError((_) {});
+
     await _load();
   }
 
@@ -136,25 +140,25 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         organizers: _organizers,
         nextOrder: _checkpoints.length + 1,
         onSaved: (cp) async {
-          try {
-            if (existing == null) {
-              await SupabaseService.instance.createCheckpoint(cp);
-            } else {
-              await SupabaseService.instance.updateCheckpoint(cp);
-            }
-          } catch (_) {
-            // Write failed — update local cache so UI reflects the change
-            final cached = await LocalStorageService.instance
-                .getCachedCheckpoints(widget.event.id);
-            List<Checkpoint> updated;
-            if (existing == null) {
-              updated = [...cached, cp];
-            } else {
-              updated =
-                  cached.map((c) => c.id == cp.id ? cp : c).toList();
-            }
-            await LocalStorageService.instance.cacheCheckpoints(updated);
+          // Always write to local cache first — ensures UI works even if
+          // Supabase is unreachable or RLS blocks the write
+          final cached = await LocalStorageService.instance
+              .getCachedCheckpoints(widget.event.id);
+          final List<Checkpoint> updated;
+          if (existing == null) {
+            updated = [...cached, cp];
+          } else {
+            updated = cached.map((c) => c.id == cp.id ? cp : c).toList();
           }
+          await LocalStorageService.instance.cacheCheckpoints(updated);
+
+          // Then try to persist to Supabase (best-effort; failure is silent)
+          if (existing == null) {
+            SupabaseService.instance.createCheckpoint(cp).catchError((_) {});
+          } else {
+            SupabaseService.instance.updateCheckpoint(cp).catchError((_) {});
+          }
+
           await _load();
         },
       ),

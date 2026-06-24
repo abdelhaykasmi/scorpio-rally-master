@@ -140,22 +140,20 @@ class _UsersScreenState extends State<UsersScreen>
         existing: existing,
         defaultRole: defaultRole,
         onSaved: (user) async {
-          try {
-            if (existing == null) {
-              await SupabaseService.instance.createUser(user);
-            } else {
-              await SupabaseService.instance.updateUser(user);
-            }
-          } catch (_) {
-            // Supabase write failed — update local cache so UI reflects the change
-            final cached = await LocalStorageService.instance.getCachedUsers();
-            List<AppUser> updated;
-            if (existing == null) {
-              updated = [...cached, user];
-            } else {
-              updated = cached.map((u) => u.id == user.id ? user : u).toList();
-            }
-            await LocalStorageService.instance.cacheUsers(updated);
+          // Local cache first — UI always reflects the change
+          final cached = await LocalStorageService.instance.getCachedUsers();
+          final List<AppUser> updated;
+          if (existing == null) {
+            updated = [...cached, user];
+          } else {
+            updated = cached.map((u) => u.id == user.id ? user : u).toList();
+          }
+          await LocalStorageService.instance.cacheUsers(updated);
+          // Supabase best-effort
+          if (existing == null) {
+            SupabaseService.instance.createUser(user).catchError((_) {});
+          } else {
+            SupabaseService.instance.updateUser(user).catchError((_) {});
           }
           await _load();
         },
@@ -231,12 +229,11 @@ class _UserList extends StatelessWidget {
       builder: (_) => _UserFormSheet(
         defaultRole: role,
         onSaved: (user) async {
-          try {
-            await SupabaseService.instance.createUser(user);
-          } catch (_) {
-            final cached = await LocalStorageService.instance.getCachedUsers();
-            await LocalStorageService.instance.cacheUsers([...cached, user]);
-          }
+          // Local cache first
+          final cached = await LocalStorageService.instance.getCachedUsers();
+          await LocalStorageService.instance.cacheUsers([...cached, user]);
+          // Supabase best-effort
+          SupabaseService.instance.createUser(user).catchError((_) {});
           onRefresh();
         },
       ),
@@ -335,35 +332,30 @@ class _UserList extends StatelessWidget {
                     existing: user,
                     defaultRole: user.role,
                     onSaved: (updated) async {
-                      try {
-                        await SupabaseService.instance.updateUser(updated);
-                      } catch (_) {
-                        final cached = await LocalStorageService.instance.getCachedUsers();
-                        await LocalStorageService.instance.cacheUsers(
+                      // Local cache first
+                      final cached = await LocalStorageService.instance.getCachedUsers();
+                      await LocalStorageService.instance.cacheUsers(
                           cached.map((u) => u.id == updated.id ? updated : u).toList());
-                      }
+                      // Supabase best-effort
+                      SupabaseService.instance.updateUser(updated).catchError((_) {});
                       onRefresh();
                     },
                   ),
                 );
               } else if (action == 'toggle') {
                 final toggled = user.copyWith(isActive: !user.isActive);
-                try {
-                  await SupabaseService.instance.updateUser(toggled);
-                } catch (_) {
-                  final cached = await LocalStorageService.instance.getCachedUsers();
-                  await LocalStorageService.instance.cacheUsers(
-                    cached.map((u) => u.id == toggled.id ? toggled : u).toList());
-                }
+                // Local cache first
+                final c1 = await LocalStorageService.instance.getCachedUsers();
+                await LocalStorageService.instance.cacheUsers(
+                    c1.map((u) => u.id == toggled.id ? toggled : u).toList());
+                SupabaseService.instance.updateUser(toggled).catchError((_) {});
                 onRefresh();
               } else if (action == 'delete') {
-                try {
-                  await SupabaseService.instance.deleteUser(user.id);
-                } catch (_) {
-                  final cached = await LocalStorageService.instance.getCachedUsers();
-                  await LocalStorageService.instance.cacheUsers(
-                    cached.where((u) => u.id != user.id).toList());
-                }
+                // Local cache first
+                final c2 = await LocalStorageService.instance.getCachedUsers();
+                await LocalStorageService.instance.cacheUsers(
+                    c2.where((u) => u.id != user.id).toList());
+                SupabaseService.instance.deleteUser(user.id).catchError((_) {});
                 onRefresh();
               }
             },

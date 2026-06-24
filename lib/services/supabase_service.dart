@@ -40,16 +40,9 @@ class SupabaseService {
     return digest.toString();
   }
 
-  // Pre-computed SHA-256 hashes — no plain passwords in source or compiled JS
-  // admin123
+  // Pre-computed SHA-256 of "admin123" — no plain password in source or JS
   static const _hAdmin =
       '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
-  // marshal123
-  static const _hMarshal =
-      '8cfd286b3293df3dd1cbe45318301887a8ee7dc3ab46815f8172bea976f79ad8';
-  // rider123
-  static const _hRider =
-      'e85978062768502c68bfd953d2d3793cf799b6abe697543512d8bc41bc60e210';
 
   // ── Seed check (one-time) ─────────────────────────────────
   Future<bool> _isSeeded() async {
@@ -64,278 +57,21 @@ class SupabaseService {
     }
   }
 
-  // ── Seed Demo Data ────────────────────────────────────────
+  // ── Seed Initial Data (admin only) ───────────────────────
+  /// Seeds only the super-admin user into Supabase on first run.
+  /// No demo organizers, riders, events, checkpoints, or passages.
+  /// All other data must be created by the admin through the app.
   Future<void> seedDemoDataIfNeeded() async {
     if (await _isSeeded()) return;
 
-    // ── 1. Users ──────────────────────────────────────────
-    final usersData = [
-      {
-        'username': 'admin',
-        'password_hash': _hAdmin,
-        'role': 'superAdmin',
-        'is_active': true,
-        'full_name': 'Super Administrator',
-      },
-      {
-        'username': 'marshal1',
-        'password_hash': _hMarshal,
-        'role': 'organizer',
-        'is_active': true,
-        'full_name': 'Marshal Alpha',
-      },
-      {
-        'username': 'marshal2',
-        'password_hash': _hMarshal,
-        'role': 'organizer',
-        'is_active': true,
-        'full_name': 'Marshal Bravo',
-      },
-      {
-        'username': 'marshal3',
-        'password_hash': _hMarshal,
-        'role': 'organizer',
-        'is_active': true,
-        'full_name': 'Marshal Charlie',
-      },
-      {
-        'username': 'rider001',
-        'password_hash': _hRider,
-        'role': 'participant',
-        'is_active': true,
-        'full_name': 'Carlos Sainz Jr.',
-        'bike_brand': 'KTM',
-        'bike_model': '450 EXC-F',
-        'engine_size': 450,
-        'bib_number': '001',
-        'nationality': 'Spanish',
-        'emergency_contact_name': 'Maria Sainz',
-        'emergency_contact_phone': '+34 600 111 222',
-      },
-      {
-        'username': 'rider002',
-        'password_hash': _hRider,
-        'role': 'participant',
-        'is_active': true,
-        'full_name': 'Nasser Al-Attiyah',
-        'bike_brand': 'Husqvarna',
-        'bike_model': 'FR 450 Rally',
-        'engine_size': 450,
-        'bib_number': '002',
-        'nationality': 'Qatari',
-        'emergency_contact_name': 'Fatima Al-Attiyah',
-        'emergency_contact_phone': '+974 5555 1234',
-      },
-      {
-        'username': 'rider003',
-        'password_hash': _hRider,
-        'role': 'participant',
-        'is_active': true,
-        'full_name': 'Toby Price',
-        'bike_brand': 'KTM',
-        'bike_model': '450 Rally',
-        'engine_size': 450,
-        'bib_number': '003',
-        'nationality': 'Australian',
-        'emergency_contact_name': 'Luke Price',
-        'emergency_contact_phone': '+61 400 333 444',
-      },
-      {
-        'username': 'rider004',
-        'password_hash': _hRider,
-        'role': 'participant',
-        'is_active': true,
-        'full_name': 'Adrien Van Beveren',
-        'bike_brand': 'Honda',
-        'bike_model': 'CRF450 Rally',
-        'engine_size': 450,
-        'bib_number': '004',
-        'nationality': 'French',
-        'emergency_contact_name': 'Claire Van Beveren',
-        'emergency_contact_phone': '+33 6 00 44 55 66',
-      },
-      {
-        'username': 'rider005',
-        'password_hash': _hRider,
-        'role': 'participant',
-        'is_active': true,
-        'full_name': 'Pablo Quintanilla',
-        'bike_brand': 'GASGAS',
-        'bike_model': 'RC 450F',
-        'engine_size': 450,
-        'bib_number': '005',
-        'nationality': 'Chilean',
-        'emergency_contact_name': 'Sofia Quintanilla',
-        'emergency_contact_phone': '+56 9 1234 5678',
-      },
-    ];
-
-    final insertedUsers = await _sb
-        .from('app_users')
-        .insert(usersData)
-        .select('id, username, role');
-
-    // Build username→id map for FK references
-    final userIdMap = <String, String>{};
-    for (final u in insertedUsers as List) {
-      userIdMap[u['username'] as String] = u['id'] as String;
-    }
-
-    // ── 2. Event ──────────────────────────────────────────
-    final insertedEvents = await _sb
-        .from('rally_events')
-        .insert({
-          'name': 'RAID Sahara Challenge 2024',
-          'date': '2024-10-15',
-          'location': 'Erfoud, Morocco',
-          'description':
-              'The ultimate off-road rally across the Moroccan Sahara. '
-              '5 stages, 800km of pure enduro challenge through dunes, '
-              'rocky canyons and mountain passes.',
-          'is_active': true,
-        })
-        .select('id')
-        .single();
-
-    final eventId = insertedEvents['id'] as String;
-
-    // ── 3. Checkpoints ────────────────────────────────────
-    final cpData = [
-      {
-        'event_id': eventId,
-        'name': 'CP1 — Dune Gateway',
-        'description': 'Start of the dune sector, Erg Chebbi entrance',
-        'order_index': 1,
-        'latitude': 31.3667,
-        'longitude': -4.0000,
-        'assigned_organizer_id': userIdMap['marshal1'],
-      },
-      {
-        'event_id': eventId,
-        'name': 'CP2 — Canyon Pass',
-        'description': 'Rocky canyon section midpoint',
-        'order_index': 2,
-        'latitude': 31.5000,
-        'longitude': -4.2500,
-        'assigned_organizer_id': userIdMap['marshal2'],
-      },
-      {
-        'event_id': eventId,
-        'name': 'CP3 — Atlas Summit',
-        'description': 'High altitude mountain checkpoint',
-        'order_index': 3,
-        'latitude': 31.6500,
-        'longitude': -4.5000,
-        'assigned_organizer_id': userIdMap['marshal3'],
-      },
-      {
-        'event_id': eventId,
-        'name': 'CP4 — Desert Bivouac',
-        'description': 'Central bivouac refuelling point',
-        'order_index': 4,
-        'latitude': 31.8000,
-        'longitude': -4.7500,
-      },
-      {
-        'event_id': eventId,
-        'name': 'FINISH — Merzouga',
-        'description': 'Final finish line at Merzouga town',
-        'order_index': 5,
-        'latitude': 31.1000,
-        'longitude': -3.9700,
-      },
-    ];
-
-    final insertedCps = await _sb
-        .from('checkpoints')
-        .insert(cpData)
-        .select('id, name, order_index');
-
-    // Sort checkpoints by order_index
-    final cpsSorted = List<Map<String, dynamic>>.from(
-        (insertedCps as List).map((e) => Map<String, dynamic>.from(e)));
-    cpsSorted.sort((a, b) =>
-        (a['order_index'] as int).compareTo(b['order_index'] as int));
-
-    final cp1Id = cpsSorted[0]['id'] as String;
-    final cp2Id = cpsSorted[1]['id'] as String;
-
-    // ── 4. Sample Passages ────────────────────────────────
-    final now = DateTime.now().toUtc();
-    final passagesData = [
-      {
-        'event_id': eventId,
-        'checkpoint_id': cp1Id,
-        'participant_id': userIdMap['rider001'],
-        'participant_name': 'Carlos Sainz Jr.',
-        'bib_number': '001',
-        'local_time':
-            now.subtract(const Duration(hours: 3, minutes: 12)).toIso8601String(),
-        'sync_status': 'synced',
-      },
-      {
-        'event_id': eventId,
-        'checkpoint_id': cp1Id,
-        'participant_id': userIdMap['rider002'],
-        'participant_name': 'Nasser Al-Attiyah',
-        'bib_number': '002',
-        'local_time':
-            now.subtract(const Duration(hours: 3, minutes: 5)).toIso8601String(),
-        'sync_status': 'synced',
-      },
-      {
-        'event_id': eventId,
-        'checkpoint_id': cp1Id,
-        'participant_id': userIdMap['rider003'],
-        'participant_name': 'Toby Price',
-        'bib_number': '003',
-        'local_time':
-            now.subtract(const Duration(hours: 2, minutes: 58)).toIso8601String(),
-        'sync_status': 'synced',
-      },
-      {
-        'event_id': eventId,
-        'checkpoint_id': cp2Id,
-        'participant_id': userIdMap['rider001'],
-        'participant_name': 'Carlos Sainz Jr.',
-        'bib_number': '001',
-        'local_time':
-            now.subtract(const Duration(hours: 1, minutes: 45)).toIso8601String(),
-        'sync_status': 'synced',
-      },
-      {
-        'event_id': eventId,
-        'checkpoint_id': cp2Id,
-        'participant_id': userIdMap['rider002'],
-        'participant_name': 'Nasser Al-Attiyah',
-        'bib_number': '002',
-        'local_time':
-            now.subtract(const Duration(hours: 1, minutes: 38)).toIso8601String(),
-        'sync_status': 'synced',
-      },
-    ];
-
-    await _sb.from('checkpoint_passages').insert(passagesData);
-
-    // Update assigned_checkpoint_id on marshals
-    if (userIdMap['marshal1'] != null) {
-      await _sb
-          .from('app_users')
-          .update({'assigned_checkpoint_id': cp1Id})
-          .eq('id', userIdMap['marshal1']!);
-    }
-    if (userIdMap['marshal2'] != null) {
-      await _sb
-          .from('app_users')
-          .update({'assigned_checkpoint_id': cp2Id})
-          .eq('id', userIdMap['marshal2']!);
-    }
-    if (userIdMap['marshal3'] != null && cpsSorted.length > 2) {
-      await _sb
-          .from('app_users')
-          .update({'assigned_checkpoint_id': cpsSorted[2]['id'] as String})
-          .eq('id', userIdMap['marshal3']!);
-    }
+    // Insert admin user only
+    await _sb.from('app_users').insert({
+      'username': 'admin',
+      'password_hash': _hAdmin,
+      'role': 'superAdmin',
+      'is_active': true,
+      'full_name': 'Administrator',
+    });
   }
 
   // ── Auth ──────────────────────────────────────────────────
