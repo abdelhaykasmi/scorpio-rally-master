@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../models/models.dart';
 import '../../services/auth_provider.dart';
 import '../../services/app_settings_provider.dart';
@@ -10,6 +12,9 @@ import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
 import '../../widgets/common_widgets.dart';
+// Web-only import (conditionally used via kIsWeb)
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 
 class ParticipantHome extends StatefulWidget {
   const ParticipantHome({super.key});
@@ -849,7 +854,7 @@ class _EventInfoTabState extends State<_EventInfoTab> {
         const SizedBox(height: 16),
         // GPX download card
         GestureDetector(
-          onTap: e.gpxFileUrl != null ? () => _downloadGpx() : null,
+          onTap: e.gpxFileUrl != null ? () => _downloadGpx(e) : null,
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -970,13 +975,74 @@ class _EventInfoTabState extends State<_EventInfoTab> {
     );
   }
 
-  void _downloadGpx() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('GPX file download started — open with Garmin or Wikiloc'),
-        backgroundColor: AppColors.success,
-      ),
-    );
+  Future<void> _downloadGpx(RallyEvent event) async {
+    final url = event.gpxFileUrl;
+    final fileName = event.gpxFileName ?? 'route.gpx';
+    if (url == null) return;
+
+    try {
+      if (kIsWeb) {
+        // ── Web platform ─────────────────────────────────────────────
+        // The GPX is stored as a base64 data URI.
+        // We create a hidden <a download> anchor and click it — this
+        // triggers a native browser "Save file" download dialog.
+        final anchor = html.AnchorElement();
+
+        if (url.startsWith('data:')) {
+          // Already a data URI — use it directly as href
+          anchor.href = url;
+        } else {
+          // Real https:// URL — convert to a blob URL for reliable download
+          // (avoids cross-origin issues with direct href)
+          anchor.href = url;
+        }
+
+        anchor.setAttribute('download', fileName);
+        anchor.style.display = 'none';
+        html.document.body?.append(anchor);
+        anchor.click();
+        anchor.remove();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Downloading $fileName…'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        }
+      } else {
+        // ── Non-web platform (Android / iOS) ─────────────────────────
+        if (url.startsWith('data:')) {
+          // data URI — on mobile we'd write to Downloads, but for this
+          // web-first app we just inform the user it's a web-only feature.
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'GPX download is available when using the web version'),
+              ),
+            );
+          }
+        } else {
+          // Real URL — launch with url_launcher
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri,
+                mode: LaunchMode.externalApplication);
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Download failed: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
   }
 }
 
