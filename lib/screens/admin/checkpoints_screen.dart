@@ -126,6 +126,11 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
     );
     if (confirm != true) return;
 
+    // If this checkpoint had an organizer assigned, clear their assignedCheckpointId
+    if (cp.assignedOrganizerId != null) {
+      await _clearOrganizerCheckpointLink(cp.assignedOrganizerId!);
+    }
+
     // Always update local cache first (instant UI feedback)
     final cached = await LocalStorageService.instance
         .getCachedCheckpoints(widget.event.id);
@@ -136,6 +141,39 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
     SupabaseService.instance.deleteCheckpoint(cp.id).catchError((_) {});
 
     await _load();
+  }
+
+  /// Sets organizer.assignedCheckpointId = checkpointId in local cache + Supabase.
+  Future<void> _setOrganizerCheckpointLink(
+      String organizerId, String checkpointId) async {
+    final users = await LocalStorageService.instance.getCachedUsers();
+    final updated = users.map((u) {
+      if (u.id == organizerId) {
+        return u.copyWith(assignedCheckpointId: checkpointId);
+      }
+      return u;
+    }).toList();
+    await LocalStorageService.instance.cacheUsers(updated);
+    // Best-effort Supabase sync
+    SupabaseService.instance
+        .updateUserCheckpointLink(organizerId, checkpointId)
+        .catchError((_) {});
+  }
+
+  /// Clears organizer.assignedCheckpointId (sets to null) in local cache + Supabase.
+  Future<void> _clearOrganizerCheckpointLink(String organizerId) async {
+    final users = await LocalStorageService.instance.getCachedUsers();
+    final updated = users.map((u) {
+      if (u.id == organizerId) {
+        return u.copyWith(clearCheckpointId: true);
+      }
+      return u;
+    }).toList();
+    await LocalStorageService.instance.cacheUsers(updated);
+    // Best-effort Supabase sync
+    SupabaseService.instance
+        .clearUserCheckpointLink(organizerId)
+        .catchError((_) {});
   }
 
   void _showDialog(Checkpoint? existing) {
@@ -152,8 +190,28 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
         organizers: _organizers,
         nextOrder: _checkpoints.length + 1,
         onSaved: (cp) async {
-          // Always write to local cache first — ensures UI works even if
-          // Supabase is unreachable or RLS blocks the write
+          // ── 1. Update organizer bi-directional link ───────────────────────
+          // When a checkpoint is assigned/reassigned/unassigned, we must also
+          // update AppUser.assignedCheckpointId so the organizer can find their
+          // checkpoint in organizer_home._loadData().
+          final oldOrganizerId = existing?.assignedOrganizerId;
+          final newOrganizerId = cp.assignedOrganizerId;
+
+          if (oldOrganizerId != newOrganizerId) {
+            // Clear the old organizer's link (if there was one)
+            if (oldOrganizerId != null) {
+              await _clearOrganizerCheckpointLink(oldOrganizerId);
+            }
+            // Set the new organizer's link (if one is assigned)
+            if (newOrganizerId != null) {
+              await _setOrganizerCheckpointLink(newOrganizerId, cp.id);
+            }
+          } else if (newOrganizerId != null && existing == null) {
+            // New checkpoint with organizer assigned from the start
+            await _setOrganizerCheckpointLink(newOrganizerId, cp.id);
+          }
+
+          // ── 2. Write checkpoint to local cache first ──────────────────────
           final cached = await LocalStorageService.instance
               .getCachedCheckpoints(widget.event.id);
           final List<Checkpoint> updated;
@@ -164,7 +222,7 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
           }
           await LocalStorageService.instance.cacheCheckpoints(updated);
 
-          // Then try to persist to Supabase (best-effort; failure is silent)
+          // ── 3. Persist to Supabase best-effort ───────────────────────────
           if (existing == null) {
             SupabaseService.instance.createCheckpoint(cp).catchError((_) {});
           } else {

@@ -65,7 +65,7 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _activateEvent(RallyEvent event) async {
-    // Local cache first
+    // Local cache first — activate this one, deactivate all others
     final cached = await LocalStorageService.instance.getCachedEvents();
     await LocalStorageService.instance.cacheEvents(
         cached.map((e) => e.copyWith(isActive: e.id == event.id)).toList());
@@ -77,6 +77,24 @@ class _EventsScreenState extends State<EventsScreen> {
         SnackBar(
           content: Text('${event.name} is now the active event'),
           backgroundColor: AppColors.success,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deactivateEvent(RallyEvent event) async {
+    // Local cache first — mark this event as inactive
+    final cached = await LocalStorageService.instance.getCachedEvents();
+    await LocalStorageService.instance.cacheEvents(
+        cached.map((e) => e.id == event.id ? e.copyWith(isActive: false) : e).toList());
+    // Supabase best-effort
+    SupabaseService.instance.deactivateEvent(event.id).catchError((_) {});
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Event deactivated'),
+          backgroundColor: AppColors.warning,
         ),
       );
     }
@@ -289,8 +307,8 @@ class _EventsScreenState extends State<EventsScreen> {
                 _action('ACTIVATE', Icons.play_arrow, () => _activateEvent(event),
                     color: AppColors.success)
               else
-                _action('ACTIVE', Icons.check_circle, null,
-                    color: AppColors.success),
+                _action('DEACTIVATE', Icons.stop_circle, () => _deactivateEvent(event),
+                    color: AppColors.warning),
               _vDivider(),
               _action('DELETE', Icons.delete_outline,
                   () => _deleteEvent(event),

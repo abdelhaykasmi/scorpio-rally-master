@@ -87,6 +87,7 @@ class AppUser {
     UserRole? role,
     bool? isActive,
     String? assignedCheckpointId,
+    bool clearCheckpointId = false, // set true to explicitly null assignedCheckpointId
     String? fullName,
     String? bikeBrand,
     String? bikeModel,
@@ -102,7 +103,9 @@ class AppUser {
       passwordHash: passwordHash ?? this.passwordHash,
       role: role ?? this.role,
       isActive: isActive ?? this.isActive,
-      assignedCheckpointId: assignedCheckpointId ?? this.assignedCheckpointId,
+      assignedCheckpointId: clearCheckpointId
+          ? null
+          : (assignedCheckpointId ?? this.assignedCheckpointId),
       fullName: fullName ?? this.fullName,
       bikeBrand: bikeBrand ?? this.bikeBrand,
       bikeModel: bikeModel ?? this.bikeModel,

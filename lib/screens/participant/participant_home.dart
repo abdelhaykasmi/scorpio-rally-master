@@ -6,6 +6,7 @@ import '../../models/models.dart';
 import '../../services/auth_provider.dart';
 import '../../services/app_settings_provider.dart';
 import '../../services/supabase_service.dart';
+import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/qr_helper.dart';
 import '../../widgets/common_widgets.dart';
@@ -79,9 +80,31 @@ class _QRCodeTabState extends State<_QRCodeTab> {
   }
 
   Future<void> _load() async {
-    final event = await SupabaseService.instance.getActiveEvent();
+    // Try Supabase first; fall back to local cache if unreachable or returns null.
+    // This is the most common cause of the "white spinning block" bug —
+    // if Supabase returns null (network issue, RLS, or event created locally only),
+    // _qrData is never set and the spinner loops forever.
+    RallyEvent? event;
+    try {
+      event = await SupabaseService.instance.getActiveEvent();
+    } catch (_) {
+      event = null;
+    }
+    if (event == null) {
+      // Supabase unreachable or no active event in DB — check local cache
+      try {
+        final remoteEvents = await SupabaseService.instance.getEvents();
+        await LocalStorageService.instance.mergeEvents(remoteEvents);
+      } catch (_) {}
+      try {
+        final cached = await LocalStorageService.instance.getCachedEvents();
+        event = cached.where((e) => e.isActive).firstOrNull;
+      } catch (_) {}
+    }
+
     if (!mounted) return;
     setState(() => _event = event);
+
     final user = context.read<AuthProvider>().currentUser;
     if (user != null && event != null) {
       final qr = QRHelper.generateQRData(
@@ -93,7 +116,20 @@ class _QRCodeTabState extends State<_QRCodeTab> {
         eventId: event.id,
         eventName: event.name,
       );
-      setState(() => _qrData = qr);
+      if (mounted) setState(() => _qrData = qr);
+    } else if (user != null && event == null) {
+      // No active event at all — generate a QR with just the participant's identity
+      // so they always have a scannable code (organizer can still record their passage)
+      final qr = QRHelper.generateQRData(
+        participantId: user.id,
+        fullName: user.fullName ?? user.username,
+        bibNumber: user.bibNumber ?? 'N/A',
+        bikeBrand: user.bikeBrand ?? '',
+        bikeModel: user.bikeModel ?? '',
+        eventId: 'no_event',
+        eventName: 'Rally',
+      );
+      if (mounted) setState(() => _qrData = qr);
     }
   }
 
@@ -397,20 +433,48 @@ class _PassageHistoryTabState extends State<_PassageHistoryTab> {
 
   Future<void> _load() async {
     final user = context.read<AuthProvider>().currentUser;
-    final event = await SupabaseService.instance.getActiveEvent();
+    // Try Supabase; fall back to local cache on failure
+    RallyEvent? event;
+    try {
+      event = await SupabaseService.instance.getActiveEvent();
+    } catch (_) {}
+    if (event == null) {
+      try {
+        final cached = await LocalStorageService.instance.getCachedEvents();
+        event = cached.where((e) => e.isActive).firstOrNull;
+      } catch (_) {}
+    }
+    if (!mounted) return;
     if (user != null && event != null) {
-      final passages = await SupabaseService.instance
-          .getPassagesForParticipant(user.id, event.id);
-      final checkpoints =
-          await SupabaseService.instance.getCheckpoints(event.id);
-      setState(() {
-        _passages = passages;
-        _checkpoints = checkpoints;
-        _event = event;
-        _loading = false;
-      });
+      List<CheckpointPassage> passages = [];
+      List<Checkpoint> checkpoints = [];
+      try {
+        passages = await SupabaseService.instance
+            .getPassagesForParticipant(user.id, event.id);
+      } catch (_) {}
+      try {
+        final remoteCps =
+            await SupabaseService.instance.getCheckpoints(event.id);
+        await LocalStorageService.instance
+            .mergeCheckpoints(remoteCps, event.id);
+        checkpoints = await LocalStorageService.instance
+            .getCachedCheckpoints(event.id);
+      } catch (_) {
+        try {
+          checkpoints = await LocalStorageService.instance
+              .getCachedCheckpoints(event.id);
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() {
+          _passages = passages;
+          _checkpoints = checkpoints;
+          _event = event;
+          _loading = false;
+        });
+      }
     } else {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -641,9 +705,32 @@ class _EventInfoTabState extends State<_EventInfoTab> {
   }
 
   Future<void> _load() async {
-    final event = await SupabaseService.instance.getActiveEvent();
+    // Try Supabase; fall back to local cache on failure
+    RallyEvent? event;
+    try {
+      event = await SupabaseService.instance.getActiveEvent();
+    } catch (_) {}
+    if (event == null) {
+      try {
+        final cached = await LocalStorageService.instance.getCachedEvents();
+        event = cached.where((e) => e.isActive).firstOrNull;
+      } catch (_) {}
+    }
     if (event != null) {
-      final cps = await SupabaseService.instance.getCheckpoints(event.id);
+      List<Checkpoint> cps = [];
+      try {
+        final remoteCps =
+            await SupabaseService.instance.getCheckpoints(event.id);
+        await LocalStorageService.instance
+            .mergeCheckpoints(remoteCps, event.id);
+        cps = await LocalStorageService.instance
+            .getCachedCheckpoints(event.id);
+      } catch (_) {
+        try {
+          cps = await LocalStorageService.instance
+              .getCachedCheckpoints(event.id);
+        } catch (_) {}
+      }
       if (mounted) setState(() {
         _event = event;
         _checkpoints = cps;

@@ -142,6 +142,23 @@ class SupabaseService {
     await _sb.from('app_users').delete().eq('id', userId);
   }
 
+  /// Sets assigned_checkpoint_id on a specific organizer user.
+  Future<void> updateUserCheckpointLink(
+      String userId, String checkpointId) async {
+    await _sb
+        .from('app_users')
+        .update({'assigned_checkpoint_id': checkpointId})
+        .eq('id', userId);
+  }
+
+  /// Clears assigned_checkpoint_id on a specific organizer user.
+  Future<void> clearUserCheckpointLink(String userId) async {
+    await _sb
+        .from('app_users')
+        .update({'assigned_checkpoint_id': null})
+        .eq('id', userId);
+  }
+
   // ── Events CRUD ───────────────────────────────────────────
   Future<List<RallyEvent>> getEvents() async {
     final res = await _sb.from('rally_events').select().order('created_at', ascending: false);
@@ -176,6 +193,10 @@ class SupabaseService {
     // Deactivate all first, then activate the target
     await _sb.from('rally_events').update({'is_active': false});
     await _sb.from('rally_events').update({'is_active': true}).eq('id', eventId);
+  }
+
+  Future<void> deactivateEvent(String eventId) async {
+    await _sb.from('rally_events').update({'is_active': false}).eq('id', eventId);
   }
 
   Future<void> deleteEvent(String eventId) async {
