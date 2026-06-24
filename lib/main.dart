@@ -5,6 +5,7 @@ import 'models/models.dart';
 import 'services/auth_provider.dart';
 import 'services/app_settings_provider.dart';
 import 'services/supabase_service.dart';
+import 'services/local_seed_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/participant/participant_home.dart';
@@ -14,17 +15,24 @@ import 'screens/admin/admin_home.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Initialize Supabase ──────────────────────────────────
-  await Supabase.initialize(
-    url: 'https://xlkdkzghcwxakujgzvkz.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
-        '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhsa2RremdoY3d4YWt1amd6dmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNzI5NTAsImV4cCI6MjA5Nzc0ODk1MH0'
-        '.2qnQNB3Z6c3rfCbDGHBiuHgJCUG8CRZYe6Cs1P1msxU',
-  );
+  // ── Initialize Supabase (with error protection) ──────────
+  try {
+    await Supabase.initialize(
+      url: 'https://xlkdkzghcwxakujgzvkz.supabase.co',
+      anonKey:
+          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
+          '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhsa2RremdoY3d4YWt1amd6dmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNzI5NTAsImV4cCI6MjA5Nzc0ODk1MH0'
+          '.2qnQNB3Z6c3rfCbDGHBiuHgJCUG8CRZYe6Cs1P1msxU',
+    );
+    // Seed demo data in background — don't block app startup
+    SupabaseService.instance.seedDemoDataIfNeeded().catchError((_) {});
+  
+  } catch (_) {
+    // Supabase init failed — app continues with local storage fallback
+  }
 
-  // ── Seed demo data (no-op if already seeded) ─────────────
-  await SupabaseService.instance.seedDemoDataIfNeeded();
+  // ── Always seed local demo data as offline fallback ──────
+  await LocalSeedService.instance.seedDemoDataIfNeeded();
 
   // ── Load persisted app settings ──────────────────────────
   final settings = AppSettingsProvider();

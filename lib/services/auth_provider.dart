@@ -32,8 +32,33 @@ class AuthProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final user = await SupabaseService.instance.signIn(
-        username.trim(), password.trim());
+    AppUser? user;
+
+    // Try Supabase first, fall back to local demo data
+    try {
+      user = await SupabaseService.instance.signIn(
+          username.trim(), password.trim());
+    } catch (_) {
+      // Supabase unavailable — try local cache (seeded demo data)
+      user = null;
+    }
+
+    // Fallback: check locally cached users (works offline / if Supabase unreachable)
+    if (user == null) {
+      final localUsers = await LocalStorageService.instance.getCachedUsers();
+      if (localUsers.isNotEmpty) {
+        final hash = SupabaseService.hashPassword(password.trim());
+        try {
+          user = localUsers.firstWhere(
+            (u) => u.username == username.trim() &&
+                u.passwordHash == hash &&
+                u.isActive,
+          );
+        } catch (_) {
+          user = null;
+        }
+      }
+    }
 
     if (user != null) {
       _currentUser = user;
