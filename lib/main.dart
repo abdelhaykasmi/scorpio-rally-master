@@ -52,9 +52,10 @@ class RaidApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider(create: (_) => AuthProvider()..tryAutoLogin()),
-        // SyncService tracks Supabase connectivity and drives full local→remote sync.
-        // Startup connectivity check runs immediately so the offline banner shows fast.
-        ChangeNotifierProvider(create: (_) => SyncService.instance..checkConnectivity()),
+        // SyncService tracks Supabase connectivity and drives bidirectional sync.
+        // initSync() checks connectivity then immediately pulls remote → local cache
+        // so every screen sees the latest Supabase data right after app load.
+        ChangeNotifierProvider(create: (_) => SyncService.instance..initSync()),
       ],
       child: Consumer<AppSettingsProvider>(
         builder: (_, s, __) => MaterialApp(

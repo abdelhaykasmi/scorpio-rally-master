@@ -221,16 +221,44 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
                                 backgroundColor: AppColors.success,
                                 duration: const Duration(seconds: 5),
                               ));
+                              // Reload dashboard stats after successful sync
+                              _load();
                             }
                           } catch (e) {
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context)
-                                  .showSnackBar(const SnackBar(
-                                content: Text(
-                                    'Sync failed — database still unreachable. Try again later.'),
-                                backgroundColor: AppColors.error,
-                                duration: Duration(seconds: 4),
-                              ));
+                              // Show the REAL error so admin can diagnose
+                              showDialog(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  backgroundColor: AppColors.surface,
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.sync_problem,
+                                          color: AppColors.error),
+                                      SizedBox(width: 8),
+                                      Text('Sync Failed',
+                                          style: TextStyle(
+                                              color: AppColors.textPrimary)),
+                                    ],
+                                  ),
+                                  content: SingleChildScrollView(
+                                    child: Text(
+                                      e.toString().replaceFirst(
+                                          'Exception: ', ''),
+                                      style: const TextStyle(
+                                          color: AppColors.textSecondary,
+                                          fontSize: 13),
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context),
+                                      child: const Text('OK'),
+                                    ),
+                                  ],
+                                ),
+                              );
                             }
                           }
                         },

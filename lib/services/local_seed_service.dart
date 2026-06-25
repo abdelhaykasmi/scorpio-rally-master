@@ -1,16 +1,19 @@
 import '../models/models.dart';
 import 'local_storage_service.dart';
 
-/// Seeds the minimum required local data so the app can function offline.
+/// Seeds the minimum required local data so the app can function offline
+/// when Supabase has never been reached yet (true first install).
 ///
-/// Only seeds ONE super-admin user (admin / admin123).
-/// No demo organizers, riders, events, checkpoints, or passages.
-/// All other data must be created by the admin through the app.
+/// Rules:
+///  1. If a superAdmin already exists in local cache → do NOTHING.
+///     (Real admin data from Supabase was already pulled — never overwrite it.)
+///  2. If legacy demo IDs exist (from old app version) → purge & re-seed admin.
+///  3. If cache is completely empty → seed the default admin.
 ///
-/// Also purges any stale demo data from the previous version that used
-/// hardcoded IDs like 'org_1', 'p_001', 'event_2024', etc.
-///
-/// Passwords stored as pre-computed SHA-256 hashes only.
+/// This means:
+///  • After initSync() pulls from Supabase, the real admin is in cache → no seed.
+///  • On a truly fresh device with no Supabase connection → local admin works.
+///  • Never wipes real admin data created through the app.
 class LocalSeedService {
   static LocalSeedService? _instance;
   static LocalSeedService get instance {
@@ -25,7 +28,7 @@ class LocalSeedService {
   static const _hAdmin =
       '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 
-  // Legacy demo user IDs that were seeded in previous versions
+  // Legacy demo user IDs seeded in previous app versions — safe to purge
   static const _legacyIds = {
     'admin_1', 'org_1', 'org_2', 'org_3',
     'p_001', 'p_002', 'p_003', 'p_004', 'p_005',
@@ -37,21 +40,27 @@ class LocalSeedService {
 
     final existing = await LocalStorageService.instance.getCachedUsers();
 
-    // ── Detect and purge legacy demo seed ─────────────────────
-    // If ANY of the old hardcoded IDs are present, the cache holds stale
-    // demo data. Wipe everything and re-seed with admin only.
+    // ── Guard: real admin already in cache ───────────────────
+    // If there's already a superAdmin (from Supabase pull or previous session),
+    // do absolutely nothing — we must never overwrite real data.
+    final hasSuperAdmin =
+        existing.any((u) => u.role == UserRole.superAdmin);
+    if (hasSuperAdmin) return;
+
+    // ── Purge legacy demo seed ────────────────────────────────
     final hasLegacyData =
         existing.any((u) => _legacyIds.contains(u.id));
-
     if (hasLegacyData) {
-      // Clear ALL local storage (users, events, checkpoints, passages, settings)
       await LocalStorageService.instance.clearAll();
     } else if (existing.isNotEmpty) {
-      // Fresh data created by the admin — nothing to seed
+      // Non-legacy, non-admin users exist (shouldn't happen, but be safe)
       return;
     }
 
-    // Seed admin only
+    // ── Seed fallback admin (offline-only) ───────────────────
+    // This admin only exists locally until Supabase sync runs.
+    // ID 'admin_local' is intentionally different from real Supabase UUIDs
+    // so mergeUsers() will keep both until the real admin is confirmed.
     final admin = AppUser(
       id: 'admin_local',
       username: 'admin',

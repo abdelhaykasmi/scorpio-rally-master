@@ -109,10 +109,13 @@ class SupabaseService {
   }
 
   Future<void> upsertEvent(RallyEvent event) async {
-    final resolved = injectGpxBytes(event);
-    await _sb
-        .from('rally_events')
-        .upsert(_eventToRow(resolved)..['id'] = resolved.id);
+    // Do NOT send gpx_file_url to Supabase — it may be a multi-MB base64
+    // data-URI that exceeds column limits. The GPX content lives in local
+    // cache only; Supabase only stores the file name as reference.
+    final row = _eventToRow(event)
+      ..['id'] = event.id
+      ..remove('gpx_file_url'); // strip data-URI / large blob
+    await _sb.from('rally_events').upsert(row);
   }
 
   Future<void> upsertCheckpoint(Checkpoint checkpoint) async {
