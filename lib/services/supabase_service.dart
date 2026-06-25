@@ -109,12 +109,10 @@ class SupabaseService {
   }
 
   Future<void> upsertEvent(RallyEvent event) async {
-    // Do NOT send gpx_file_url to Supabase — it may be a multi-MB base64
-    // data-URI that exceeds column limits. The GPX content lives in local
-    // cache only; Supabase only stores the file name as reference.
-    final row = _eventToRow(event)
-      ..['id'] = event.id
-      ..remove('gpx_file_url'); // strip data-URI / large blob
+    // Inject GPX bytes → data URI before sending so the URL is persisted
+    // in Supabase and available to all devices (not just the uploader's browser).
+    final resolved = injectGpxBytes(event);
+    final row = _eventToRow(resolved)..['id'] = resolved.id;
     await _sb.from('rally_events').upsert(row);
   }
 
@@ -410,7 +408,9 @@ class SupabaseService {
   }
 
   Future<void> setSetting(String key, String value) async {
-    await _sb.from('app_settings').upsert({'key': key, 'value': value});
+    await _sb
+        .from('app_settings')
+        .upsert({'key': key, 'value': value}, onConflict: 'key');
   }
 
   // ── Row Mappers ───────────────────────────────────────────

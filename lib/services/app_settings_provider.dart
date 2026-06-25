@@ -2,9 +2,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'supabase_service.dart';
 
 /// Global app settings persisted across sessions.
 /// Admin controls everything; participants & organizers read the values.
+///
+/// Persistence strategy:
+///   • All settings → SharedPreferences (instant, works offline, survives refresh)
+///   • Text/color/font settings → also Supabase app_settings table
+///     so they survive logout and are shared across devices
+///   • Logo bytes → SharedPreferences only (too large for Supabase TEXT column)
 class AppSettingsProvider extends ChangeNotifier {
   static const _keyPrimary   = 'setting_primary_color';
   static const _keySecondary = 'setting_secondary_color';
@@ -19,7 +26,7 @@ class AppSettingsProvider extends ChangeNotifier {
   Color  _secondaryColor = const Color(0xFFB71C1C);
   Uint8List? _logoBytes;
   String?    _logoName;
-  double _fontScaleParticipant = 1.0;   // 0.8 – 1.4
+  double _fontScaleParticipant = 1.0;
   double _fontScaleOrganizer   = 1.0;
   String _appTitle = 'RAID';
 
@@ -33,15 +40,23 @@ class AppSettingsProvider extends ChangeNotifier {
   double get fontScaleOrganizer      => _fontScaleOrganizer;
   String get appTitle                => _appTitle;
 
-  /// Convenience: accent gradient using primary/secondary
   LinearGradient get accentGradient => LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [_primaryColor, _secondaryColor],
   );
 
-  // ── Init ─────────────────────────────────────────────────
+  // ── Load ─────────────────────────────────────────────────
+  /// Called once at app startup (before runApp).
+  /// Step 1: Load from SharedPreferences (instant, offline-safe).
+  /// Step 2: Pull from Supabase and overwrite if newer values exist.
   Future<void> load() async {
+    await _loadFromPrefs();
+    // Pull from Supabase in the background — don't block app startup
+    _pullFromSupabase().catchError((_) {});
+  }
+
+  Future<void> _loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
 
     final priHex = prefs.getString(_keyPrimary);
@@ -61,24 +76,85 @@ class AppSettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Pull settings from Supabase and merge into local state + SharedPreferences.
+  /// Called on startup and after manual sync.
+  Future<void> _pullFromSupabase() async {
+    try {
+      final priHex = await SupabaseService.instance.getSetting(_keyPrimary);
+      final secHex = await SupabaseService.instance.getSetting(_keySecondary);
+      final fontPart = await SupabaseService.instance.getSetting(_keyFontPart);
+      final fontOrg  = await SupabaseService.instance.getSetting(_keyFontOrg);
+      final title    = await SupabaseService.instance.getSetting(_keyAppTitle);
+
+      final prefs = await SharedPreferences.getInstance();
+      bool changed = false;
+
+      if (priHex != null) {
+        _primaryColor = _hexToColor(priHex);
+        await prefs.setString(_keyPrimary, priHex);
+        changed = true;
+      }
+      if (secHex != null) {
+        _secondaryColor = _hexToColor(secHex);
+        await prefs.setString(_keySecondary, secHex);
+        changed = true;
+      }
+      if (fontPart != null) {
+        _fontScaleParticipant =
+            (double.tryParse(fontPart) ?? 1.0).clamp(0.8, 1.4);
+        await prefs.setDouble(_keyFontPart, _fontScaleParticipant);
+        changed = true;
+      }
+      if (fontOrg != null) {
+        _fontScaleOrganizer =
+            (double.tryParse(fontOrg) ?? 1.0).clamp(0.8, 1.4);
+        await prefs.setDouble(_keyFontOrg, _fontScaleOrganizer);
+        changed = true;
+      }
+      if (title != null) {
+        _appTitle = title.isEmpty ? 'RAID' : title;
+        await prefs.setString(_keyAppTitle, _appTitle);
+        changed = true;
+      }
+
+      if (changed) notifyListeners();
+    } catch (_) {
+      // Supabase unavailable — SharedPreferences values remain in use
+    }
+  }
+
+  // ── Helpers: write to both SharedPreferences and Supabase ─
+  Future<void> _saveToPrefs(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+  }
+
+  /// Fire-and-forget Supabase write — never blocks the UI.
+  void _saveToSupabase(String key, String value) {
+    SupabaseService.instance.setSetting(key, value).catchError((_) {});
+  }
+
   // ── Setters ──────────────────────────────────────────────
   Future<void> setPrimaryColor(Color color) async {
     _primaryColor = color;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyPrimary, _colorToHex(color));
+    final hex = _colorToHex(color);
+    await _saveToPrefs(_keyPrimary, hex);
+    _saveToSupabase(_keyPrimary, hex);
     notifyListeners();
   }
 
   Future<void> setSecondaryColor(Color color) async {
     _secondaryColor = color;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keySecondary, _colorToHex(color));
+    final hex = _colorToHex(color);
+    await _saveToPrefs(_keySecondary, hex);
+    _saveToSupabase(_keySecondary, hex);
     notifyListeners();
   }
 
   Future<void> setLogo(Uint8List bytes, String name) async {
     _logoBytes = bytes;
     _logoName  = name;
+    // Logo bytes are too large for Supabase — store locally only
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyLogoB64, base64Encode(bytes));
     await prefs.setString(_keyLogoName, name);
@@ -96,22 +172,22 @@ class AppSettingsProvider extends ChangeNotifier {
 
   Future<void> setFontScaleParticipant(double scale) async {
     _fontScaleParticipant = scale.clamp(0.8, 1.4);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_keyFontPart, _fontScaleParticipant);
+    await _saveToPrefs(_keyFontPart, _fontScaleParticipant.toString());
+    _saveToSupabase(_keyFontPart, _fontScaleParticipant.toString());
     notifyListeners();
   }
 
   Future<void> setFontScaleOrganizer(double scale) async {
     _fontScaleOrganizer = scale.clamp(0.8, 1.4);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_keyFontOrg, _fontScaleOrganizer);
+    await _saveToPrefs(_keyFontOrg, _fontScaleOrganizer.toString());
+    _saveToSupabase(_keyFontOrg, _fontScaleOrganizer.toString());
     notifyListeners();
   }
 
   Future<void> setAppTitle(String title) async {
     _appTitle = title.trim().isEmpty ? 'RAID' : title.trim();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyAppTitle, _appTitle);
+    await _saveToPrefs(_keyAppTitle, _appTitle);
+    _saveToSupabase(_keyAppTitle, _appTitle);
     notifyListeners();
   }
 
@@ -139,11 +215,11 @@ class AppSettingsProvider extends ChangeNotifier {
         surface: const Color(0xFF1A1A1A),
         error: const Color(0xFFE53935),
       ),
-      appBarTheme: AppBarTheme(
-        backgroundColor: const Color(0xFF1A1A1A),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFF1A1A1A),
         foregroundColor: Colors.white,
         elevation: 0,
-        titleTextStyle: const TextStyle(
+        titleTextStyle: TextStyle(
           color: Colors.white,
           fontSize: 18,
           fontWeight: FontWeight.w700,
@@ -164,8 +240,12 @@ class AppSettingsProvider extends ChangeNotifier {
           foregroundColor: Colors.white,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 1.2),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -173,8 +253,12 @@ class AppSettingsProvider extends ChangeNotifier {
           foregroundColor: _primaryColor,
           side: BorderSide(color: _primaryColor),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 1.2),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -198,9 +282,11 @@ class AppSettingsProvider extends ChangeNotifier {
         labelStyle: const TextStyle(color: Color(0xFFB0B0B0)),
         hintStyle: const TextStyle(color: Color(0xFF666666)),
         prefixIconColor: const Color(0xFF666666),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
-      dividerTheme: const DividerThemeData(color: Color(0xFF2A2A2A), thickness: 1),
+      dividerTheme:
+          const DividerThemeData(color: Color(0xFF2A2A2A), thickness: 1),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: const Color(0xFF1A1A1A),
         selectedItemColor: _primaryColor,
@@ -223,22 +309,31 @@ class AppSettingsProvider extends ChangeNotifier {
         backgroundColor: const Color(0xFF242424),
         labelStyle: const TextStyle(color: Color(0xFFB0B0B0)),
         side: const BorderSide(color: Color(0xFF2A2A2A)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         selectedColor: _primaryColor.withValues(alpha: 0.3),
       ),
       textTheme: const TextTheme(
-        displayLarge:  TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
-        displayMedium: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
-        headlineLarge: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-        headlineMedium:TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        titleLarge:    TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        titleMedium:   TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-        titleSmall:    TextStyle(color: Color(0xFFB0B0B0), fontWeight: FontWeight.w500),
-        bodyLarge:     TextStyle(color: Colors.white),
-        bodyMedium:    TextStyle(color: Color(0xFFB0B0B0)),
-        bodySmall:     TextStyle(color: Color(0xFF666666)),
-        labelLarge:    TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        labelSmall:    TextStyle(color: Color(0xFF666666)),
+        displayLarge:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
+        displayMedium:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        headlineLarge:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        headlineMedium:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        titleLarge:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        titleMedium:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+        titleSmall: TextStyle(
+            color: Color(0xFFB0B0B0), fontWeight: FontWeight.w500),
+        bodyLarge: TextStyle(color: Colors.white),
+        bodyMedium: TextStyle(color: Color(0xFFB0B0B0)),
+        bodySmall: TextStyle(color: Color(0xFF666666)),
+        labelLarge:
+            TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        labelSmall: TextStyle(color: Color(0xFF666666)),
       ),
       useMaterial3: true,
     );
