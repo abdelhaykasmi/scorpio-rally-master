@@ -23,7 +23,7 @@ void main() async {
       anonKey:
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
           '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhsa2RremdoY3d4YWt1amd6dmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNzI5NTAsImV4cCI6MjA5Nzc0ODk1MH0'
-          '.2qnQNB3Z6c3rfCbDGHBiuHgJCUG8CRZYe6Cs1P1msxU',
+          '.g1fb7IIAIlhqF5qgW_rAsH9rGEWMiJoTws4x4P1msxU',
     );
     // Seed demo data in background — don't block app startup
     SupabaseService.instance.seedDemoDataIfNeeded().catchError((_) {});
