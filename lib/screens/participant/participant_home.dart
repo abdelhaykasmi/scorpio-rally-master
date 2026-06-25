@@ -710,17 +710,21 @@ class _EventInfoTabState extends State<_EventInfoTab> {
   }
 
   Future<void> _load() async {
-    // Try Supabase; fall back to local cache on failure
+    // Always merge Supabase into local cache first, then read from local cache.
+    // This ensures gpxFileUrl (data URI) is preserved from local cache even when
+    // Supabase has null (e.g. file was too large for the TEXT column).
+    try {
+      final remoteEvents = await SupabaseService.instance.getEvents();
+      await LocalStorageService.instance.mergeEvents(remoteEvents);
+    } catch (_) {}
+
+    // Read active event from local cache (authoritative source after merge)
     RallyEvent? event;
     try {
-      event = await SupabaseService.instance.getActiveEvent();
+      final cached = await LocalStorageService.instance.getCachedEvents();
+      event = cached.where((e) => e.isActive).firstOrNull;
     } catch (_) {}
-    if (event == null) {
-      try {
-        final cached = await LocalStorageService.instance.getCachedEvents();
-        event = cached.where((e) => e.isActive).firstOrNull;
-      } catch (_) {}
-    }
+
     if (event != null) {
       List<Checkpoint> cps = [];
       try {

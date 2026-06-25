@@ -157,9 +157,23 @@ class LocalStorageService {
   Future<void> mergeEvents(List<RallyEvent> remote) async {
     if (remote.isEmpty) return;
     final local = await getCachedEvents();
+    final localMap = {for (final e in local) e.id: e};
     final remoteIds = {for (final e in remote) e.id};
     final merged = [
-      ...remote,
+      // For each remote event, prefer remote fields BUT preserve the local
+      // gpxFileUrl when remote has null — the data URI may be too large for
+      // Supabase's TEXT column and fail silently, so local cache is the
+      // authoritative source for GPX content.
+      ...remote.map((r) {
+        final loc = localMap[r.id];
+        if (loc != null && r.gpxFileUrl == null && loc.gpxFileUrl != null) {
+          return r.copyWith(
+            gpxFileUrl: loc.gpxFileUrl,
+            gpxFileName: loc.gpxFileName ?? r.gpxFileName,
+          );
+        }
+        return r;
+      }),
       ...local.where((e) => !remoteIds.contains(e.id)),
     ];
     await cacheEvents(merged);

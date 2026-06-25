@@ -141,17 +141,24 @@ class _EventsScreenState extends State<EventsScreen> {
       builder: (_) => _EventFormSheet(
         existing: existing,
         onSaved: (event) async {
-          // Write to local cache first — instant UI, survives Supabase failure
+          // ── Inject GPX bytes → data URI BEFORE local cache write ──
+          // event.gpxFileUrl is null when a new file was picked (the form sets
+          // gpxFileUrl=null and puts raw bytes in gpxBytes so the service can
+          // upload them). We must convert bytes → data URI here so local cache
+          // always has a downloadable URL — independently of Supabase success.
+          final resolved = injectGpxBytes(event);
+
+          // Write resolved event (with data URI) to local cache first
           final cached = await LocalStorageService.instance.getCachedEvents();
           final List<RallyEvent> updated;
           if (existing == null) {
-            updated = [...cached, event];
+            updated = [...cached, resolved];
           } else {
-            updated = cached.map((e) => e.id == event.id ? event : e).toList();
+            updated = cached.map((e) => e.id == resolved.id ? resolved : e).toList();
           }
           await LocalStorageService.instance.cacheEvents(updated);
 
-          // Persist to Supabase best-effort
+          // Persist to Supabase best-effort (injectGpxBytes called again inside)
           if (existing == null) {
             SupabaseService.instance.createEvent(event).catchError((_) {});
           } else {

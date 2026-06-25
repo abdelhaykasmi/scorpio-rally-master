@@ -8,7 +8,9 @@ import 'local_storage_service.dart';
 SupabaseClient get _sb => Supabase.instance.client;
 
 /// Converts gpxBytes (transient) to a base64 data-URI stored in gpxFileUrl.
-RallyEvent _injectGpxBytes(RallyEvent event) {
+/// Public so events_screen.dart can call it before writing to local cache,
+/// ensuring the data URI is always stored locally regardless of Supabase.
+RallyEvent injectGpxBytes(RallyEvent event) {
   if (event.gpxBytes != null && event.gpxBytes!.isNotEmpty) {
     final b64 = base64Encode(event.gpxBytes!);
     return event.copyWith(
@@ -18,6 +20,9 @@ RallyEvent _injectGpxBytes(RallyEvent event) {
   }
   return event;
 }
+
+// Keep the private alias for internal use
+RallyEvent _injectGpxBytes(RallyEvent event) => injectGpxBytes(event);
 
 /// Column name mappings: Dart field → Supabase column
 /// AppUser  → app_users
