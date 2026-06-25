@@ -413,6 +413,76 @@ class SupabaseService {
         .upsert({'key': key, 'value': value}, onConflict: 'key');
   }
 
+  // ── Schema Validation ─────────────────────────────────────
+  /// Probes the live Supabase database for missing/incorrect schema.
+  /// Returns a [SchemaStatus] with boolean flags and a human-readable
+  /// SQL block the admin can paste into the Supabase SQL Editor to fix any
+  /// issues.  Never throws.
+  Future<SchemaStatus> probeSchema() async {
+    bool hasAppSettings = false;
+    bool hasGpxColumn = false;
+    final List<String> issues = [];
+    final List<String> sqlFixes = [];
+
+    // ── 1. Check app_settings table ──────────────────────────
+    try {
+      // A successful select means the table exists and RLS allows reads.
+      await _sb.from('app_settings').select('key').limit(1);
+      hasAppSettings = true;
+    } catch (e) {
+      hasAppSettings = false;
+      issues.add('app_settings table is missing or RLS blocks access');
+      sqlFixes.add('''-- ① Create app_settings table and allow anon access
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON app_settings;
+CREATE POLICY "allow_all" ON app_settings
+  FOR ALL USING (true) WITH CHECK (true);''');
+    }
+
+    // ── 2. Check rally_events.gpx_file_url column ────────────
+    try {
+      // Select a single row including the column.
+      // If the column doesn't exist PostgREST returns a 400 "column not found".
+      await _sb.from('rally_events').select('id, gpx_file_url').limit(1);
+      hasGpxColumn = true;
+    } catch (e) {
+      hasGpxColumn = false;
+      issues.add('rally_events.gpx_file_url column is missing');
+      sqlFixes.add('''-- ② Add gpx_file_url + gpx_file_name to rally_events
+ALTER TABLE rally_events
+  ADD COLUMN IF NOT EXISTS gpx_file_url  TEXT,
+  ADD COLUMN IF NOT EXISTS gpx_file_name TEXT;''');
+    }
+
+    // ── 3. Check RLS on all core tables ──────────────────────
+    for (final table in ['rally_events', 'checkpoints', 'checkpoint_passages', 'app_users']) {
+      try {
+        await _sb.from(table).select('id').limit(1);
+      } catch (e) {
+        final msg = e.toString();
+        if (msg.contains('42501') || msg.contains('permission denied') || msg.contains('RLS')) {
+          issues.add('RLS blocks anon access to $table');
+          sqlFixes.add('''-- ③ Allow anon access to $table
+ALTER TABLE $table ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON $table;
+CREATE POLICY "allow_all" ON $table
+  FOR ALL USING (true) WITH CHECK (true);''');
+        }
+      }
+    }
+
+    return SchemaStatus(
+      hasAppSettings: hasAppSettings,
+      hasGpxColumn: hasGpxColumn,
+      issues: issues,
+      sqlFixes: sqlFixes,
+    );
+  }
+
   // ── Row Mappers ───────────────────────────────────────────
 
   AppUser _userFromRow(Map<String, dynamic> r) {
@@ -527,4 +597,24 @@ class SupabaseService {
       ),
     );
   }
+}
+
+// ── Schema status returned by SupabaseService.probeSchema() ──
+class SchemaStatus {
+  final bool hasAppSettings;
+  final bool hasGpxColumn;
+  final List<String> issues;
+  final List<String> sqlFixes;
+
+  const SchemaStatus({
+    required this.hasAppSettings,
+    required this.hasGpxColumn,
+    required this.issues,
+    required this.sqlFixes,
+  });
+
+  bool get isHealthy => issues.isEmpty;
+
+  /// Full SQL block to fix all detected issues, separated by newlines.
+  String get fixSql => sqlFixes.join('\n\n');
 }

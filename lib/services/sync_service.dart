@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'supabase_service.dart';
 import 'local_storage_service.dart';
 
+export 'supabase_service.dart' show SchemaStatus;
+
 enum SyncState { unknown, online, offline, syncing }
 
 /// Tracks Supabase connectivity and drives bidirectional sync:
@@ -20,23 +22,52 @@ class SyncService extends ChangeNotifier {
 
   SyncState _state = SyncState.unknown;
   String? _lastError;
+  SchemaStatus? _schemaStatus;
 
   SyncState get state => _state;
   String? get lastError => _lastError;
   bool get isOnline => _state == SyncState.online;
   bool get isOffline => _state == SyncState.offline;
+  SchemaStatus? get schemaStatus => _schemaStatus;
+  bool get hasSchemaIssues => _schemaStatus != null && !_schemaStatus!.isHealthy;
 
   // ── Startup: check connectivity then pull ─────────────────
   /// Called once at app startup. If reachable, immediately pulls all
   /// remote data into local cache so every screen sees the latest state.
+  /// Also runs a background schema probe so the admin sees schema issues
+  /// immediately after login.
   Future<void> initSync() async {
     final online = await checkConnectivity();
     if (online) {
-      try {
-        await _pullFromSupabase();
-      } catch (_) {
-        // Pull failed — local cache stays valid, no data lost
-      }
+      // Run schema probe and data pull concurrently
+      await Future.wait([
+        _runSchemaProbe(),
+        _pullFromSupabase().catchError((_) {}),
+      ]);
+    }
+  }
+
+  // ── Schema probe ──────────────────────────────────────────
+  Future<void> _runSchemaProbe() async {
+    try {
+      final status = await SupabaseService.instance.probeSchema();
+      _schemaStatus = status;
+      notifyListeners();
+    } catch (_) {
+      // Schema probe failed — ignore, connectivity error takes precedence
+    }
+  }
+
+  /// Manually re-run the schema probe and return the result.
+  /// Called by admin after running the SQL fix.
+  Future<SchemaStatus> recheckSchema() async {
+    try {
+      final status = await SupabaseService.instance.probeSchema();
+      _schemaStatus = status;
+      notifyListeners();
+      return status;
+    } catch (e) {
+      throw Exception('Schema check failed: $e');
     }
   }
 
@@ -185,29 +216,49 @@ class SyncService extends ChangeNotifier {
     }
 
     try {
-      // 1. Push local → remote
+      // 1. Run schema probe (parallel with push for speed)
+      final schemaFuture = _runSchemaProbe();
+
+      // 2. Push local → remote
       final result = await _pushToSupabase();
 
-      // 2. Pull remote → local (so UI sees latest data from all devices)
+      // 3. Pull remote → local (so UI sees latest data from all devices)
       await _pullFromSupabase();
+
+      // 4. Wait for schema probe to complete
+      await schemaFuture;
 
       _state = SyncState.online;
       _lastError = null;
       notifyListeners();
 
       if (result.errors > 0) {
-        // Surface the actual error so user/admin can diagnose
-        throw Exception(
-            '${result.errors} item(s) failed to sync.\n\n'
-            'Most likely cause: Supabase RLS (Row Level Security) is blocking '
-            'writes from the anon key.\n\n'
-            'Fix: In Supabase dashboard → Table Editor → each table → '
-            'Policies → add policy:\n'
-            '  Name: allow_all\n'
-            '  For: ALL operations\n'
-            '  USING expression: true\n'
-            '  WITH CHECK expression: true\n\n'
-            'First error: ${result.firstError}');
+        // Build a targeted error message based on schema probe results
+        final sb = StringBuffer();
+        sb.writeln('${result.errors} item(s) failed to sync.');
+        sb.writeln();
+
+        if (_schemaStatus != null && !_schemaStatus!.isHealthy) {
+          sb.writeln('DATABASE SCHEMA ISSUES DETECTED:');
+          for (final issue in _schemaStatus!.issues) {
+            sb.writeln('  • $issue');
+          }
+          sb.writeln();
+          sb.writeln('Run the SQL in Settings → Setup Database Schema to fix.');
+        } else {
+          sb.writeln('Most likely cause: Supabase RLS (Row Level Security) is '
+              'blocking writes from the anon key.');
+          sb.writeln();
+          sb.writeln('Fix: In Supabase SQL Editor run:');
+          sb.writeln('''
+CREATE POLICY "allow_all" ON rally_events FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON checkpoints   FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON app_users     FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON checkpoint_passages FOR ALL USING (true) WITH CHECK (true);''');
+        }
+        sb.writeln();
+        sb.writeln('First error: ${result.firstError}');
+        throw Exception(sb.toString());
       }
 
       return 'Synced: ${result.users} users, ${result.events} events, '

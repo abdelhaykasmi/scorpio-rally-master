@@ -92,6 +92,14 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
     _load();
   }
 
+  // ── Schema fix dialog ─────────────────────────────────────
+  static void _showSchemaDialog(BuildContext ctx, SchemaStatus status) {
+    showDialog(
+      context: ctx,
+      builder: (_) => _SchemaFixDialog(status: status),
+    );
+  }
+
   Future<void> _load() async {
     try {
       // Try Supabase first
@@ -160,6 +168,44 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
       child: Column(
         children: [
           _buildHeader(user),
+          // ── Schema issues banner (highest priority, always visible) ──
+          Consumer<SyncService>(
+            builder: (_, sync, __) {
+              if (!sync.hasSchemaIssues) return const SizedBox.shrink();
+              return GestureDetector(
+                onTap: () => _showSchemaDialog(context, sync.schemaStatus!),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.14),
+                    border: Border(
+                      bottom: BorderSide(color: AppColors.error.withValues(alpha: 0.5)),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline,
+                          color: AppColors.error, size: 16),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Database schema issues detected — tap to view SQL fix',
+                          style: TextStyle(
+                            color: AppColors.error,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios,
+                          color: AppColors.error, size: 12),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
           // ── Sync / offline status banner ──────────────────
           Consumer<SyncService>(
             builder: (_, sync, __) {
@@ -545,4 +591,148 @@ class _Action {
   final Color color;
   final VoidCallback onTap;
   _Action(this.label, this.icon, this.color, this.onTap);
+}
+
+// ── Schema Fix Dialog ─────────────────────────────────────────
+/// Shows a copyable SQL block the admin can paste into the Supabase SQL Editor
+/// to create missing tables, columns and RLS policies.
+class _SchemaFixDialog extends StatefulWidget {
+  final SchemaStatus status;
+  const _SchemaFixDialog({required this.status});
+
+  @override
+  State<_SchemaFixDialog> createState() => _SchemaFixDialogState();
+}
+
+class _SchemaFixDialogState extends State<_SchemaFixDialog> {
+  bool _recheckLoading = false;
+  String? _recheckResult;
+
+  Future<void> _recheck() async {
+    setState(() { _recheckLoading = true; _recheckResult = null; });
+    try {
+      final s = await SyncService.instance.recheckSchema();
+      if (mounted) {
+        setState(() {
+          _recheckLoading = false;
+          _recheckResult = s.isHealthy
+              ? '✅ All schema issues resolved!'
+              : '⚠️ ${s.issues.length} issue(s) still remain. Run the SQL again.';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _recheckLoading = false; _recheckResult = 'Error: $e'; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sql = widget.status.fixSql;
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      title: const Row(
+        children: [
+          Icon(Icons.build_circle, color: AppColors.error, size: 22),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Fix Database Schema',
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 16,
+                  fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Issues list
+              ...widget.status.issues.map((issue) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.warning_amber, color: AppColors.warning, size: 14),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(issue,
+                        style: const TextStyle(color: AppColors.warning,
+                            fontSize: 12, fontWeight: FontWeight.w600))),
+                  ],
+                ),
+              )),
+              const SizedBox(height: 12),
+              const Text(
+                'Paste this SQL into Supabase → SQL Editor → New Query → Run:',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              // SQL block
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1117),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFF30363D)),
+                ),
+                child: SelectableText(
+                  sql,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    color: Color(0xFF79C0FF),
+                    fontSize: 11,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_recheckResult != null)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _recheckResult!.startsWith('✅')
+                        ? AppColors.success.withValues(alpha: 0.1)
+                        : AppColors.warning.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(_recheckResult!,
+                      style: TextStyle(
+                        color: _recheckResult!.startsWith('✅')
+                            ? AppColors.success
+                            : AppColors.warning,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      )),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        ElevatedButton.icon(
+          onPressed: _recheckLoading ? null : _recheck,
+          icon: _recheckLoading
+              ? const SizedBox(width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.refresh, size: 16),
+          label: const Text('Re-check Schema'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.accent,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
 }

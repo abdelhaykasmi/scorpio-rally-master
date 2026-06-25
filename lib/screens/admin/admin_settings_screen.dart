@@ -1,8 +1,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../services/app_settings_provider.dart';
+import '../../services/supabase_service.dart';
+import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -341,6 +344,12 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             ),
           ),
           const SizedBox(height: 24),
+
+          // ── DATABASE SETUP ─────────────────────────────────
+          const SectionHeader(title: 'Database Setup', padding: EdgeInsets.only(bottom: 10)),
+          _DatabaseSetupCard(),
+
+          const SizedBox(height: 32),
         ],
       ),
     );
@@ -521,6 +530,238 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             backgroundColor: AppColors.success),
       );
     }
+  }
+}
+
+// ── Database Setup Card ────────────────────────────────────
+/// Shows the current schema status and provides a copyable SQL block
+/// the admin can paste into Supabase SQL Editor to create missing
+/// tables / columns and enable anon RLS policies.
+class _DatabaseSetupCard extends StatefulWidget {
+  const _DatabaseSetupCard();
+  @override
+  State<_DatabaseSetupCard> createState() => _DatabaseSetupCardState();
+}
+
+class _DatabaseSetupCardState extends State<_DatabaseSetupCard> {
+  bool _loading = false;
+  SchemaStatus? _status;
+  bool _copied = false;
+
+  // The "all-in-one" SQL that creates everything the app needs
+  static const String _fullSetupSql = '''-- ═══════════════════════════════════════════════════
+-- Scorpio Rally Master — Full Database Setup
+-- Paste this into Supabase → SQL Editor → Run
+-- ═══════════════════════════════════════════════════
+
+-- 1. app_settings table (stores colors, font scales, app title)
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON app_settings;
+CREATE POLICY "allow_all" ON app_settings
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- 2. Add GPX columns to rally_events (if missing)
+ALTER TABLE rally_events
+  ADD COLUMN IF NOT EXISTS gpx_file_url  TEXT,
+  ADD COLUMN IF NOT EXISTS gpx_file_name TEXT;
+
+-- 3. RLS policies for all core tables
+ALTER TABLE rally_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON rally_events;
+CREATE POLICY "allow_all" ON rally_events
+  FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE checkpoints ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON checkpoints;
+CREATE POLICY "allow_all" ON checkpoints
+  FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE app_users ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON app_users;
+CREATE POLICY "allow_all" ON app_users
+  FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE checkpoint_passages ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON checkpoint_passages;
+CREATE POLICY "allow_all" ON checkpoint_passages
+  FOR ALL USING (true) WITH CHECK (true);''';
+
+  Future<void> _checkSchema() async {
+    setState(() { _loading = true; });
+    try {
+      final s = await SupabaseService.instance.probeSchema();
+      if (mounted) setState(() { _status = s; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _loading = false; });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Check failed: $e'),
+          backgroundColor: AppColors.error,
+        ));
+      }
+    }
+  }
+
+  Future<void> _copyToClipboard() async {
+    await Clipboard.setData(const ClipboardData(text: _fullSetupSql));
+    if (mounted) {
+      setState(() => _copied = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _copied = false);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('SQL copied to clipboard!'),
+          backgroundColor: AppColors.success,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CarbonCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.storage, color: AppColors.accent, size: 18),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Supabase Schema',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        )),
+                    Text(
+                      'Create tables, columns & RLS policies',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              if (_loading)
+                const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
+              else
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  color: AppColors.textMuted,
+                  onPressed: _checkSchema,
+                  tooltip: 'Check schema',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+            ],
+          ),
+
+          if (_status != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _status!.isHealthy
+                    ? AppColors.success.withValues(alpha: 0.08)
+                    : AppColors.error.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: _status!.isHealthy
+                      ? AppColors.success.withValues(alpha: 0.3)
+                      : AppColors.error.withValues(alpha: 0.3),
+                ),
+              ),
+              child: _status!.isHealthy
+                  ? const Row(children: [
+                      Icon(Icons.check_circle, color: AppColors.success, size: 16),
+                      SizedBox(width: 8),
+                      Text('Schema is healthy — all tables and columns exist',
+                          style: TextStyle(color: AppColors.success,
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                    ])
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _status!.issues.map((i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.cancel, color: AppColors.error, size: 14),
+                            const SizedBox(width: 6),
+                            Expanded(child: Text(i,
+                                style: const TextStyle(color: AppColors.error,
+                                    fontSize: 12, fontWeight: FontWeight.w600))),
+                          ],
+                        ),
+                      )).toList(),
+                    ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
+          const Text(
+            'Copy the SQL below and paste it in:\nSupabase Dashboard → SQL Editor → New Query → Run',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 10),
+
+          // SQL code block
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D1117),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFF30363D)),
+            ),
+            child: SelectableText(
+              _fullSetupSql,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                color: Color(0xFF79C0FF),
+                fontSize: 10,
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _copyToClipboard,
+                  icon: Icon(_copied ? Icons.check : Icons.copy, size: 16),
+                  label: Text(_copied ? 'COPIED!' : 'COPY SQL'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _copied ? AppColors.success : AppColors.accent,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                onPressed: _loading ? null : _checkSchema,
+                icon: const Icon(Icons.fact_check, size: 16),
+                label: const Text('CHECK'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.surface,
+                  foregroundColor: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 
