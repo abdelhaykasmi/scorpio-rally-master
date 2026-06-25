@@ -222,13 +222,24 @@ class SupabaseService {
   }
 
   Future<void> activateEvent(String eventId) async {
-    // Deactivate all first, then activate the target
-    await _sb.from('rally_events').update({'is_active': false});
-    await _sb.from('rally_events').update({'is_active': true}).eq('id', eventId);
+    // PostgREST rejects unfiltered UPDATE (no WHERE clause) with 400.
+    // Fetch all events, deactivate each individually, then activate the target.
+    // This avoids the "unfiltered update" error while keeping only one active event.
+    final all = await _sb.from('rally_events').select('id');
+    for (final row in all as List) {
+      final id = row['id'] as String;
+      await _sb
+          .from('rally_events')
+          .update({'is_active': id == eventId})
+          .eq('id', id);
+    }
   }
 
   Future<void> deactivateEvent(String eventId) async {
-    await _sb.from('rally_events').update({'is_active': false}).eq('id', eventId);
+    await _sb
+        .from('rally_events')
+        .update({'is_active': false})
+        .eq('id', eventId);
   }
 
   Future<void> deleteEvent(String eventId) async {

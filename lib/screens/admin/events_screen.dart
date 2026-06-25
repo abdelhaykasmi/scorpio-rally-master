@@ -87,15 +87,26 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _activateEvent(RallyEvent event) async {
-    // Local cache first — activate this one, deactivate all others
+    // 1. Write to local cache first (instant UI feedback, survives Supabase failure)
     final cached = await LocalStorageService.instance.getCachedEvents();
-    await LocalStorageService.instance.cacheEvents(
-        cached.map((e) => e.copyWith(isActive: e.id == event.id)).toList());
-    // Supabase — report offline if fails
-    final ok = await _tryWrite(() => SupabaseService.instance.activateEvent(event.id));
-    if (!ok) _showOfflineSnackBar('Activation');
-    await _load();
+    final updated =
+        cached.map((e) => e.copyWith(isActive: e.id == event.id)).toList();
+    await LocalStorageService.instance.cacheEvents(updated);
+
+    // 2. Refresh UI from local cache immediately — before Supabase call
+    //    so the button flips to DEACTIVATE right away regardless of network
     if (mounted) {
+      setState(() {
+        _events = updated..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      });
+    }
+
+    // 3. Push to Supabase (non-blocking for UI)
+    final ok = await _tryWrite(
+        () => SupabaseService.instance.activateEvent(event.id));
+    if (!ok) {
+      _showOfflineSnackBar('Activation');
+    } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${event.name} is now the active event'),
@@ -106,15 +117,26 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Future<void> _deactivateEvent(RallyEvent event) async {
-    // Local cache first — mark this event as inactive
+    // 1. Write to local cache first
     final cached = await LocalStorageService.instance.getCachedEvents();
-    await LocalStorageService.instance.cacheEvents(
-        cached.map((e) => e.id == event.id ? e.copyWith(isActive: false) : e).toList());
-    // Supabase — report offline if fails
-    final ok = await _tryWrite(() => SupabaseService.instance.deactivateEvent(event.id));
-    if (!ok) _showOfflineSnackBar('Deactivation');
-    await _load();
+    final updated = cached
+        .map((e) => e.id == event.id ? e.copyWith(isActive: false) : e)
+        .toList();
+    await LocalStorageService.instance.cacheEvents(updated);
+
+    // 2. Refresh UI from local cache immediately
     if (mounted) {
+      setState(() {
+        _events = updated..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      });
+    }
+
+    // 3. Push to Supabase
+    final ok = await _tryWrite(
+        () => SupabaseService.instance.deactivateEvent(event.id));
+    if (!ok) {
+      _showOfflineSnackBar('Deactivation');
+    } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Event deactivated'),
