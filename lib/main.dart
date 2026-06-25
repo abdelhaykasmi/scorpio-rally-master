@@ -6,6 +6,7 @@ import 'services/auth_provider.dart';
 import 'services/app_settings_provider.dart';
 import 'services/supabase_service.dart';
 import 'services/local_seed_service.dart';
+import 'services/sync_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/participant/participant_home.dart';
@@ -51,6 +52,9 @@ class RaidApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider(create: (_) => AuthProvider()..tryAutoLogin()),
+        // SyncService tracks Supabase connectivity and drives full local→remote sync.
+        // Startup connectivity check runs immediately so the offline banner shows fast.
+        ChangeNotifierProvider(create: (_) => SyncService.instance..checkConnectivity()),
       ],
       child: Consumer<AppSettingsProvider>(
         builder: (_, s, __) => MaterialApp(

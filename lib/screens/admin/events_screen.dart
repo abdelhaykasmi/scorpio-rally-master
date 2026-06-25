@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
 import '../../services/supabase_service.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'checkpoints_screen.dart';
@@ -20,6 +21,27 @@ class EventsScreen extends StatefulWidget {
 class _EventsScreenState extends State<EventsScreen> {
   List<RallyEvent> _events = [];
   bool _loading = true;
+
+  /// Attempts a Supabase write. On failure, marks connectivity offline and
+  /// returns false so the caller can show a snackbar.
+  Future<bool> _tryWrite(Future<void> Function() write) async {
+    try {
+      await write();
+      return true;
+    } catch (_) {
+      SyncService.instance.checkConnectivity();
+      return false;
+    }
+  }
+
+  void _showOfflineSnackBar(String entity) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('$entity saved locally. Tap ••• Sync to push to database.'),
+      backgroundColor: AppColors.warning,
+      duration: const Duration(seconds: 4),
+    ));
+  }
 
   @override
   void initState() {
@@ -69,8 +91,9 @@ class _EventsScreenState extends State<EventsScreen> {
     final cached = await LocalStorageService.instance.getCachedEvents();
     await LocalStorageService.instance.cacheEvents(
         cached.map((e) => e.copyWith(isActive: e.id == event.id)).toList());
-    // Supabase best-effort
-    SupabaseService.instance.activateEvent(event.id).catchError((_) {});
+    // Supabase — report offline if fails
+    final ok = await _tryWrite(() => SupabaseService.instance.activateEvent(event.id));
+    if (!ok) _showOfflineSnackBar('Activation');
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -87,8 +110,9 @@ class _EventsScreenState extends State<EventsScreen> {
     final cached = await LocalStorageService.instance.getCachedEvents();
     await LocalStorageService.instance.cacheEvents(
         cached.map((e) => e.id == event.id ? e.copyWith(isActive: false) : e).toList());
-    // Supabase best-effort
-    SupabaseService.instance.deactivateEvent(event.id).catchError((_) {});
+    // Supabase — report offline if fails
+    final ok = await _tryWrite(() => SupabaseService.instance.deactivateEvent(event.id));
+    if (!ok) _showOfflineSnackBar('Deactivation');
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,8 +148,9 @@ class _EventsScreenState extends State<EventsScreen> {
       final cached = await LocalStorageService.instance.getCachedEvents();
       await LocalStorageService.instance.cacheEvents(
           cached.where((e) => e.id != event.id).toList());
-      // Supabase best-effort
-      SupabaseService.instance.deleteEvent(event.id).catchError((_) {});
+      // Supabase — report offline if fails
+      final ok = await _tryWrite(() => SupabaseService.instance.deleteEvent(event.id));
+      if (!ok) _showOfflineSnackBar('Delete');
       await _load();
     }
   }
@@ -158,11 +183,19 @@ class _EventsScreenState extends State<EventsScreen> {
           }
           await LocalStorageService.instance.cacheEvents(updated);
 
-          // Persist to Supabase best-effort (injectGpxBytes called again inside)
+          // Persist to Supabase — report offline if fails
+          final bool ok;
           if (existing == null) {
-            SupabaseService.instance.createEvent(event).catchError((_) {});
+            ok = await _tryWrite(() => SupabaseService.instance.upsertEvent(resolved));
           } else {
-            SupabaseService.instance.updateEvent(event).catchError((_) {});
+            ok = await _tryWrite(() => SupabaseService.instance.upsertEvent(resolved));
+          }
+          if (!ok && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Event saved locally. Tap ••• Sync to push to database.'),
+              backgroundColor: AppColors.warning,
+              duration: Duration(seconds: 4),
+            ));
           }
 
           await _load();

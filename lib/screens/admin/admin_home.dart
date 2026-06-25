@@ -5,6 +5,7 @@ import '../../services/app_settings_provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/supabase_service.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'admin_settings_screen.dart';
@@ -159,6 +160,99 @@ class _AdminDashboardTabState extends State<_AdminDashboardTab> {
       child: Column(
         children: [
           _buildHeader(user),
+          // ── Sync / offline status banner ──────────────────
+          Consumer<SyncService>(
+            builder: (_, sync, __) {
+              if (sync.state == SyncState.unknown) return const SizedBox.shrink();
+              if (sync.state == SyncState.online) return const SizedBox.shrink();
+
+              final isSyncing = sync.state == SyncState.syncing;
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSyncing
+                      ? AppColors.info.withValues(alpha: 0.12)
+                      : AppColors.warning.withValues(alpha: 0.12),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isSyncing
+                          ? AppColors.info.withValues(alpha: 0.4)
+                          : AppColors.warning.withValues(alpha: 0.4),
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    isSyncing
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              color: AppColors.info,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.cloud_off,
+                            color: AppColors.warning, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isSyncing
+                            ? 'Syncing to database…'
+                            : 'Database offline — data saved locally only',
+                        style: TextStyle(
+                          color: isSyncing ? AppColors.info : AppColors.warning,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (!isSyncing)
+                      TextButton(
+                        onPressed: () async {
+                          try {
+                            final result =
+                                await SyncService.instance.syncAllToSupabase();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context)
+                                  .showSnackBar(SnackBar(
+                                content: Text(result),
+                                backgroundColor: AppColors.success,
+                                duration: const Duration(seconds: 5),
+                              ));
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context)
+                                  .showSnackBar(const SnackBar(
+                                content: Text(
+                                    'Sync failed — database still unreachable. Try again later.'),
+                                backgroundColor: AppColors.error,
+                                duration: Duration(seconds: 4),
+                              ));
+                            }
+                          }
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.warning,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text('SYNC NOW',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                            )),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _load,

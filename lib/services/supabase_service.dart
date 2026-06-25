@@ -97,6 +97,30 @@ class SupabaseService {
     }
   }
 
+  // ── Connectivity probe ────────────────────────────────────
+  /// Throws if Supabase is unreachable or returns an error.
+  Future<void> pingSupabase() async {
+    await _sb.from('app_users').select('id').limit(1);
+  }
+
+  // ── Upsert helpers (used by SyncService) ─────────────────
+  Future<void> upsertUser(AppUser user) async {
+    await _sb.from('app_users').upsert(_userToRow(user)..['id'] = user.id);
+  }
+
+  Future<void> upsertEvent(RallyEvent event) async {
+    final resolved = injectGpxBytes(event);
+    await _sb
+        .from('rally_events')
+        .upsert(_eventToRow(resolved)..['id'] = resolved.id);
+  }
+
+  Future<void> upsertCheckpoint(Checkpoint checkpoint) async {
+    await _sb
+        .from('checkpoints')
+        .upsert(_checkpointToRow(checkpoint)..['id'] = checkpoint.id);
+  }
+
   // ── Users CRUD ────────────────────────────────────────────
   Future<List<AppUser>> getUsers() async {
     final res = await _sb.from('app_users').select().order('created_at');

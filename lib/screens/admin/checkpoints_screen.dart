@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import '../../models/models.dart';
 import '../../services/supabase_service.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -19,6 +20,26 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
   List<AppUser> _organizers = [];
   bool _loading = true;
   String? _error;
+
+  /// Attempts a Supabase write. On failure, marks connectivity offline.
+  Future<bool> _tryWrite(Future<void> Function() write) async {
+    try {
+      await write();
+      return true;
+    } catch (_) {
+      SyncService.instance.checkConnectivity();
+      return false;
+    }
+  }
+
+  void _showOfflineSnackBar(String entity) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('$entity saved locally. Tap ••• Sync to push to database.'),
+      backgroundColor: AppColors.warning,
+      duration: const Duration(seconds: 4),
+    ));
+  }
 
   @override
   void initState() {
@@ -222,12 +243,11 @@ class _CheckpointsScreenState extends State<CheckpointsScreen> {
           }
           await LocalStorageService.instance.cacheCheckpoints(updated);
 
-          // ── 3. Persist to Supabase best-effort ───────────────────────────
-          if (existing == null) {
-            SupabaseService.instance.createCheckpoint(cp).catchError((_) {});
-          } else {
-            SupabaseService.instance.updateCheckpoint(cp).catchError((_) {});
-          }
+          // ── 3. Persist to Supabase — report offline if fails ─────────────
+          final ok = await _tryWrite(
+            () => SupabaseService.instance.upsertCheckpoint(cp),
+          );
+          if (!ok) _showOfflineSnackBar('Checkpoint');
 
           await _load();
         },
