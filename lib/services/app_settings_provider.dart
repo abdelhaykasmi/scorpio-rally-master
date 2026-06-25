@@ -12,6 +12,9 @@ import 'supabase_service.dart';
 ///   • Text/color/font settings → also Supabase app_settings table
 ///     so they survive logout and are shared across devices
 ///   • Logo bytes → SharedPreferences only (too large for Supabase TEXT column)
+///
+/// Key invariant: font scale is stored in SharedPreferences as a DOUBLE
+/// (not a string) using setDouble/getDouble to avoid type-mismatch reads.
 class AppSettingsProvider extends ChangeNotifier {
   static const _keyPrimary   = 'setting_primary_color';
   static const _keySecondary = 'setting_secondary_color';
@@ -49,7 +52,7 @@ class AppSettingsProvider extends ChangeNotifier {
   // ── Load ─────────────────────────────────────────────────
   /// Called once at app startup (before runApp).
   /// Step 1: Load from SharedPreferences (instant, offline-safe).
-  /// Step 2: Pull from Supabase and overwrite if newer values exist.
+  /// Step 2: Pull from Supabase and overwrite if values exist there.
   Future<void> load() async {
     await _loadFromPrefs();
     // Pull from Supabase in the background — don't block app startup
@@ -69,64 +72,100 @@ class AppSettingsProvider extends ChangeNotifier {
     if (logoB64 != null) _logoBytes = base64Decode(logoB64);
     _logoName = prefs.getString(_keyLogoName);
 
-    _fontScaleParticipant = prefs.getDouble(_keyFontPart) ?? 1.0;
-    _fontScaleOrganizer   = prefs.getDouble(_keyFontOrg)  ?? 1.0;
+    // Font scale: stored as Double in prefs; fall back to String parse for
+    // legacy data that was stored as String in older builds.
+    _fontScaleParticipant = prefs.getDouble(_keyFontPart)
+        ?? double.tryParse(prefs.getString(_keyFontPart) ?? '')
+        ?? 1.0;
+    _fontScaleOrganizer   = prefs.getDouble(_keyFontOrg)
+        ?? double.tryParse(prefs.getString(_keyFontOrg) ?? '')
+        ?? 1.0;
+
     _appTitle = prefs.getString(_keyAppTitle) ?? 'RAID';
 
     notifyListeners();
   }
 
   /// Pull settings from Supabase and merge into local state + SharedPreferences.
-  /// Called on startup and after manual sync.
+  /// Called on startup (background) and by pushAllToSupabase after a write.
   Future<void> _pullFromSupabase() async {
-    try {
-      final priHex = await SupabaseService.instance.getSetting(_keyPrimary);
-      final secHex = await SupabaseService.instance.getSetting(_keySecondary);
-      final fontPart = await SupabaseService.instance.getSetting(_keyFontPart);
-      final fontOrg  = await SupabaseService.instance.getSetting(_keyFontOrg);
-      final title    = await SupabaseService.instance.getSetting(_keyAppTitle);
+    final priHex  = await SupabaseService.instance.getSetting(_keyPrimary);
+    final secHex  = await SupabaseService.instance.getSetting(_keySecondary);
+    final fontPart = await SupabaseService.instance.getSetting(_keyFontPart);
+    final fontOrg  = await SupabaseService.instance.getSetting(_keyFontOrg);
+    final title    = await SupabaseService.instance.getSetting(_keyAppTitle);
 
-      final prefs = await SharedPreferences.getInstance();
-      bool changed = false;
+    final prefs = await SharedPreferences.getInstance();
+    bool changed = false;
 
-      if (priHex != null) {
-        _primaryColor = _hexToColor(priHex);
-        await prefs.setString(_keyPrimary, priHex);
-        changed = true;
-      }
-      if (secHex != null) {
-        _secondaryColor = _hexToColor(secHex);
-        await prefs.setString(_keySecondary, secHex);
-        changed = true;
-      }
-      if (fontPart != null) {
-        _fontScaleParticipant =
-            (double.tryParse(fontPart) ?? 1.0).clamp(0.8, 1.4);
-        await prefs.setDouble(_keyFontPart, _fontScaleParticipant);
-        changed = true;
-      }
-      if (fontOrg != null) {
-        _fontScaleOrganizer =
-            (double.tryParse(fontOrg) ?? 1.0).clamp(0.8, 1.4);
-        await prefs.setDouble(_keyFontOrg, _fontScaleOrganizer);
-        changed = true;
-      }
-      if (title != null) {
-        _appTitle = title.isEmpty ? 'RAID' : title;
-        await prefs.setString(_keyAppTitle, _appTitle);
-        changed = true;
-      }
-
-      if (changed) notifyListeners();
-    } catch (_) {
-      // Supabase unavailable — SharedPreferences values remain in use
+    if (priHex != null) {
+      _primaryColor = _hexToColor(priHex);
+      await prefs.setString(_keyPrimary, priHex);
+      changed = true;
     }
+    if (secHex != null) {
+      _secondaryColor = _hexToColor(secHex);
+      await prefs.setString(_keySecondary, secHex);
+      changed = true;
+    }
+    if (fontPart != null) {
+      final v = (double.tryParse(fontPart) ?? 1.0).clamp(0.8, 1.4);
+      _fontScaleParticipant = v;
+      await prefs.setDouble(_keyFontPart, v);
+      changed = true;
+    }
+    if (fontOrg != null) {
+      final v = (double.tryParse(fontOrg) ?? 1.0).clamp(0.8, 1.4);
+      _fontScaleOrganizer = v;
+      await prefs.setDouble(_keyFontOrg, v);
+      changed = true;
+    }
+    if (title != null) {
+      _appTitle = title.isEmpty ? 'RAID' : title;
+      await prefs.setString(_keyAppTitle, _appTitle);
+      changed = true;
+    }
+
+    if (changed) notifyListeners();
   }
 
-  // ── Helpers: write to both SharedPreferences and Supabase ─
+  // ── Push ALL current settings to Supabase ─────────────────
+  /// Writes every non-logo setting to Supabase in parallel.
+  /// Call this from the "Push to cloud" button in the Settings screen, or
+  /// after the database schema has just been fixed (so values set before the
+  /// table existed are not lost).
+  /// Returns a map of key → error message for any that failed.
+  Future<Map<String, String>> pushAllToSupabase() async {
+    final Map<String, String> errors = {};
+
+    final pairs = {
+      _keyPrimary:   _colorToHex(_primaryColor),
+      _keySecondary: _colorToHex(_secondaryColor),
+      _keyFontPart:  _fontScaleParticipant.toString(),
+      _keyFontOrg:   _fontScaleOrganizer.toString(),
+      _keyAppTitle:  _appTitle,
+    };
+
+    await Future.wait(pairs.entries.map((e) async {
+      try {
+        await SupabaseService.instance.setSetting(e.key, e.value);
+      } catch (err) {
+        errors[e.key] = err.toString();
+      }
+    }));
+
+    return errors;
+  }
+
+  // ── Private write helpers ─────────────────────────────────
   Future<void> _saveToPrefs(String key, String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(key, value);
+  }
+
+  Future<void> _saveDoubleToPrefs(String key, double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(key, value);
   }
 
   /// Fire-and-forget Supabase write — never blocks the UI.
@@ -154,7 +193,7 @@ class AppSettingsProvider extends ChangeNotifier {
   Future<void> setLogo(Uint8List bytes, String name) async {
     _logoBytes = bytes;
     _logoName  = name;
-    // Logo bytes are too large for Supabase — store locally only
+    // Logo bytes are too large for Supabase TEXT — store locally only
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyLogoB64, base64Encode(bytes));
     await prefs.setString(_keyLogoName, name);
@@ -172,14 +211,15 @@ class AppSettingsProvider extends ChangeNotifier {
 
   Future<void> setFontScaleParticipant(double scale) async {
     _fontScaleParticipant = scale.clamp(0.8, 1.4);
-    await _saveToPrefs(_keyFontPart, _fontScaleParticipant.toString());
+    // Store as Double (not String) so getDouble() reads it back correctly
+    await _saveDoubleToPrefs(_keyFontPart, _fontScaleParticipant);
     _saveToSupabase(_keyFontPart, _fontScaleParticipant.toString());
     notifyListeners();
   }
 
   Future<void> setFontScaleOrganizer(double scale) async {
     _fontScaleOrganizer = scale.clamp(0.8, 1.4);
-    await _saveToPrefs(_keyFontOrg, _fontScaleOrganizer.toString());
+    await _saveDoubleToPrefs(_keyFontOrg, _fontScaleOrganizer);
     _saveToSupabase(_keyFontOrg, _fontScaleOrganizer.toString());
     notifyListeners();
   }
@@ -192,8 +232,10 @@ class AppSettingsProvider extends ChangeNotifier {
   }
 
   // ── Helpers ──────────────────────────────────────────────
+  /// Encodes a Color as an 8-char lowercase hex string (AARRGGBB).
+  /// Uses toARGB32() instead of the deprecated .value getter.
   static String _colorToHex(Color c) =>
-      c.value.toRadixString(16).padLeft(8, '0');
+      c.toARGB32().toRadixString(16).padLeft(8, '0');
 
   static Color _hexToColor(String hex) {
     try {

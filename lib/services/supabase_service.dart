@@ -168,6 +168,32 @@ class SupabaseService {
     await _sb.from('app_users').update(_userToRow(user)).eq('id', user.id);
   }
 
+  /// Changes password for a user identified by [userId].
+  /// [currentPasswordHash] is pre-hashed with [hashPassword].
+  /// Verifies the current password first, then updates to [newPasswordHash].
+  /// Throws a descriptive String if verification fails.
+  Future<void> changePassword({
+    required String userId,
+    required String currentPasswordHash,
+    required String newPasswordHash,
+  }) async {
+    // Verify current password
+    final res = await _sb
+        .from('app_users')
+        .select('id')
+        .eq('id', userId)
+        .eq('password_hash', currentPasswordHash)
+        .limit(1);
+    if ((res as List).isEmpty) {
+      throw 'Current password is incorrect.';
+    }
+    // Apply new password
+    await _sb
+        .from('app_users')
+        .update({'password_hash': newPasswordHash})
+        .eq('id', userId);
+  }
+
   Future<void> deleteUser(String userId) async {
     await _sb.from('app_users').delete().eq('id', userId);
   }

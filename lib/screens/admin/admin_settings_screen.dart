@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../services/app_settings_provider.dart';
+import '../../services/auth_provider.dart';
 import '../../services/supabase_service.dart';
 import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
@@ -22,6 +23,8 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   // local ephemeral state while the user drags
   late double _partScale;
   late double _orgScale;
+
+  bool _pushLoading = false;
 
   @override
   void initState() {
@@ -343,6 +346,41 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+
+          // ── PUSH ALL TO CLOUD ──────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _pushLoading ? null : _pushAllToCloud,
+              icon: _pushLoading
+                  ? const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.cloud_upload, size: 18),
+              label: Text(_pushLoading ? 'SAVING TO CLOUD…' : 'PUSH ALL SETTINGS TO CLOUD'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1565C0),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Saves current colors, font sizes and title to the database so they '
+            'appear on every browser and device — even after logout.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── CHANGE PASSWORD ────────────────────────────────
+          const SectionHeader(title: 'Security', padding: EdgeInsets.only(bottom: 10)),
+          _ChangePasswordCard(),
+
           const SizedBox(height: 24),
 
           // ── DATABASE SETUP ─────────────────────────────────
@@ -493,6 +531,35 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
+  Future<void> _pushAllToCloud() async {
+    setState(() => _pushLoading = true);
+    try {
+      final errors = await context.read<AppSettingsProvider>().pushAllToSupabase();
+      if (!mounted) return;
+      if (errors.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ All settings saved to cloud successfully'),
+          backgroundColor: AppColors.success,
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('⚠️ ${errors.length} setting(s) failed: ${errors.values.first}'),
+          backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 6),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Push failed: $e'),
+          backgroundColor: AppColors.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _pushLoading = false);
+    }
+  }
+
   Future<void> _confirmReset() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -530,6 +597,189 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             backgroundColor: AppColors.success),
       );
     }
+  }
+}
+
+// ── Change Password Card ───────────────────────────────────
+class _ChangePasswordCard extends StatefulWidget {
+  const _ChangePasswordCard();
+  @override
+  State<_ChangePasswordCard> createState() => _ChangePasswordCardState();
+}
+
+class _ChangePasswordCardState extends State<_ChangePasswordCard> {
+  final _currentCtrl = TextEditingController();
+  final _newCtrl     = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  final _formKey     = GlobalKey<FormState>();
+
+  bool _obscureCurrent = true;
+  bool _obscureNew     = true;
+  bool _obscureConfirm = true;
+  bool _loading        = false;
+
+  @override
+  void dispose() {
+    _currentCtrl.dispose();
+    _newCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final user = context.read<AuthProvider>().currentUser;
+    if (user == null) return;
+
+    setState(() => _loading = true);
+
+    try {
+      final currentHash = SupabaseService.hashPassword(_currentCtrl.text.trim());
+      final newHash     = SupabaseService.hashPassword(_newCtrl.text.trim());
+
+      await SupabaseService.instance.changePassword(
+        userId: user.id,
+        currentPasswordHash: currentHash,
+        newPasswordHash: newHash,
+      );
+
+      // Also update local cache so auto-login still works
+      final updated = user.copyWith(passwordHash: newHash);
+      context.read<AuthProvider>().updateCurrentUser(updated);
+
+      if (mounted) {
+        _currentCtrl.clear();
+        _newCtrl.clear();
+        _confirmCtrl.clear();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Password changed successfully'),
+          backgroundColor: AppColors.success,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$e'),
+          backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 5),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CarbonCard(
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.lock_outline, color: AppColors.accent, size: 18),
+                SizedBox(width: 8),
+                Text('Change Admin Password',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    )),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Current password
+            TextFormField(
+              controller: _currentCtrl,
+              obscureText: _obscureCurrent,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                labelText: 'Current Password',
+                prefixIcon: const Icon(Icons.lock),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscureCurrent
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined),
+                  onPressed: () =>
+                      setState(() => _obscureCurrent = !_obscureCurrent),
+                ),
+              ),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Enter current password';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+
+            // New password
+            TextFormField(
+              controller: _newCtrl,
+              obscureText: _obscureNew,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                labelText: 'New Password',
+                prefixIcon: const Icon(Icons.lock_reset),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscureNew
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined),
+                  onPressed: () =>
+                      setState(() => _obscureNew = !_obscureNew),
+                ),
+              ),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Enter a new password';
+                if (v.trim().length < 6) return 'Password must be at least 6 characters';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+
+            // Confirm new password
+            TextFormField(
+              controller: _confirmCtrl,
+              obscureText: _obscureConfirm,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                labelText: 'Confirm New Password',
+                prefixIcon: const Icon(Icons.lock_reset),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscureConfirm
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined),
+                  onPressed: () =>
+                      setState(() => _obscureConfirm = !_obscureConfirm),
+                ),
+              ),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Confirm your new password';
+                if (v.trim() != _newCtrl.text.trim()) return 'Passwords do not match';
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _loading ? null : _submit,
+                icon: _loading
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.check, size: 18),
+                label: Text(_loading ? 'CHANGING…' : 'CHANGE PASSWORD'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
